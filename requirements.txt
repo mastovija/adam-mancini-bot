@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────
+# Adam Mancini Bot - Dependencias Python
+# ─────────────────────────────────────────────────────────────
+
+# ── Scraping ──────────────────────────────────────────────────
+twikit>=2.2.0          # Scraping Twitter/X sin API key (usa cookies)
+requests>=2.31.0       # HTTP requests para Substack y APIs
+beautifulsoup4>=4.12.0 # Parsear HTML del newsletter Substack
+lxml>=5.0.0            # Parser HTML rápido para beautifulsoup
+
+# ── LLM / Inteligencia Artificial ─────────────────────────────
+anthropic>=0.25.0      # Claude API — usamos Haiku (~$3-5/mes)
+
+# ── Base vectorial (RAG) ──────────────────────────────────────
+chromadb>=0.5.0        # Base de datos vectorial local, sin coste
+
+# ── Datos de mercado ──────────────────────────────────────────
+alpaca-py>=0.25.0      # Alpaca API para SPY en tiempo real (gratis)
+
+# ── Bot de Telegram ───────────────────────────────────────────
+python-telegram-bot>=21.0  # Enviar alertas al móvil
+
+# ── Análisis de datos y técnico ───────────────────────────────
+pandas>=2.0.0          # Manipulación de datos de mercado
+pandas-ta>=0.3.14b     # Indicadores técnicos (RSI, VWAP, etc.)
+numpy>=1.24.0          # Cálculos numéricos
+
+# ── Utilidades ────────────────────────────────────────────────
+python-dotenv>=1.0.0   # Carga variables desde .env
+apscheduler>=3.10.0    # Tareas programadas (parseo diario, monitoring)
+pytz>=2024.1           # Zonas horarias (mercado NY = EST)
