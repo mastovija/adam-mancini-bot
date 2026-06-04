@@ -1,0 +1,11 @@
+.env
+.env.local
+data/raw/
+data/processed/
+data/chromadb/
+**/cookies.json
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.log

@@ -273,14 +273,20 @@ def scrape_newsletter():
     # ── 6. Guardar metadatos de artículos de pago ─────────────────────────
     # Aunque no tenemos el contenido, guardamos los metadatos para saber qué existe
     if to_download_paid:
-        print(f"\n💾 Guardando metadatos de {len(to_download_paid)} artículos de pago...")
-        for post in to_download_paid:
+        print(f"\n📥 Descargando preview de {len(to_download_paid)} artículos de pago...")
+        print("-" * 40)
+        for i, post in enumerate(to_download_paid, 1):
+            date_str  = post['published_at']
+            title_str = post['title'][:55] + ('...' if len(post['title']) > 55 else '')
+            print(f"  [{i:4d}/{len(to_download_paid)}] {date_str} — {title_str}")
+
+            # Descargamos igual que los gratuitos — captura lo que sea visible
+            article = scrape_post_content(post)
             output_file = NEWSLETTER_DIR / f"{post['slug']}.json"
             with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(
-                    {**post, 'content': '', 'scrape_status': 'paid_no_content'},
-                    f, indent=2, ensure_ascii=False
-                )
+                json.dump(article, f, indent=2, ensure_ascii=False)
+
+            time.sleep(DELAY_BETWEEN_REQUESTS)
 
     # ── Resumen final ─────────────────────────────────────────────────────
     print("\n" + "=" * 55)
