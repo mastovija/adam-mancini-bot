@@ -24,6 +24,8 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from bot.telegram_alerts import TelegramAlerter
+
 
 import anthropic
 import pytz
@@ -209,12 +211,12 @@ def clasificar_tweet(texto: str, fecha: str) -> dict:
 # ─────────────────────────────────────────────
 
 async def enviar_telegram(mensaje: str):
-    """
-    Envía un mensaje por Telegram.
-    Por ahora solo imprime en consola — se conectará en la Fase 6.
-    """
-    print(f"\n📱 TELEGRAM: {mensaje}\n")
-    # TODO Fase 6: implementar envío real con python-telegram-bot
+    print(f"📱 {mensaje}")
+    try:
+        alerter = TelegramAlerter()
+        await alerter.send(mensaje)
+    except Exception as e:
+        print(f"  ⚠️  Error Telegram: {e}")
 
 
 # ─────────────────────────────────────────────
