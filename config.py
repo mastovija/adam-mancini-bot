@@ -90,7 +90,7 @@ CHROMA_COLLECTION = 'adam_mancini_knowledge'  # nombre de la colección
 # Horario de mercado (NYSE, zona horaria NY)
 # ─────────────────────────────────────────────
 MARKET_TIMEZONE   = 'America/New_York'
-MARKET_OPEN_HOUR  = 9
-MARKET_OPEN_MIN   = 30
-MARKET_CLOSE_HOUR = 16
-MARKET_CLOSE_MIN  = 0
+MARKET_OPEN_HOUR  = 7   # antes era 9
+MARKET_OPEN_MIN   = 30  # igual
+MARKET_CLOSE_HOUR = 17  # antes era 16
+MARKET_CLOSE_MIN  = 0   # igual
