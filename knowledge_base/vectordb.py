@@ -33,8 +33,8 @@ def get_collection():
     """
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
-    # SentenceTransformer: modelo ligero y gratuito, bueno para textos cortos
-    # Se descarga automáticamente la primera vez (~80 MB)
+    # DefaultEmbeddingFunction usa ONNX (all-MiniLM-L6-v2 cuantizado).
+    # Es la alternativa a sentence-transformers, que no soporta Python 3.13.
     ef = embedding_functions.DefaultEmbeddingFunction()
 
 

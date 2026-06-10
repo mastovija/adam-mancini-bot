@@ -9,3 +9,11 @@ __pycache__/
 venv/
 .venv/
 *.log
+.DS_Store
+**/.DS_Store
+# Runtime state and generated data
+data/daily/
+data/historical/
+data/backtest/
+data/signal_engine_state.json
+data/tweet_monitor_state.json

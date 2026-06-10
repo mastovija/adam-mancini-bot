@@ -29,3 +29,6 @@ numpy>=1.24.0          # Cálculos numéricos
 python-dotenv>=1.0.0   # Carga variables desde .env
 apscheduler>=3.10.0    # Tareas programadas (parseo diario, monitoring)
 pytz>=2024.1           # Zonas horarias (mercado NY = EST)
+
+playwright>=1.40.0     # Monitor de tweets (intercepta GraphQL de X)
+# Tras instalar: playwright install chromium

@@ -27,13 +27,15 @@ import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from bot.telegram_alerts import TelegramAlerter
-
+# IMPORTANTE: añadir la raíz del proyecto al path ANTES de importar
+# cualquier módulo propio (bot, config, market_data...). Si no,
+# ejecutar este archivo directamente falla con ModuleNotFoundError.
+sys.path.append(str(Path(__file__).parent.parent))
 
 import anthropic
 import pytz
 
-sys.path.append(str(Path(__file__).parent.parent))
+from bot.telegram_alerts import TelegramAlerter
 
 from config import (
     DATA_DIR,
@@ -82,23 +84,34 @@ def load_today() -> dict | None:
 
 def get_all_levels(today: dict) -> list:
     """
-    Extrae todos los niveles de precio relevantes del mapa del día.
-    Los ordena de mayor a menor (los soportes más cercanos primero).
+    Extrae los niveles del mapa del día CONSERVANDO su tipo.
+
+    Antes devolvíamos una lista plana de números y perdíamos la información
+    de si cada nivel era soporte o resistencia — eso provocaba longs en
+    resistencias. Ahora cada nivel es un dict: {'nivel': 7527.0, 'tipo': 'soporte'}
+
+    El nivel crítico se marca como 'pivote': actúa de soporte si el precio
+    está por encima, y de resistencia si está por debajo.
     """
     niveles = []
 
-    if today.get('nivel_critico'):
-        niveles.append(float(today['nivel_critico']))
-
     for n in today.get('soportes', []):
         if n:
-            niveles.append(float(n))
+            niveles.append({'nivel': float(n), 'tipo': 'soporte'})
 
     for n in today.get('resistencias', []):
         if n:
-            niveles.append(float(n))
+            niveles.append({'nivel': float(n), 'tipo': 'resistencia'})
 
-    return sorted(set(niveles), reverse=True)
+    if today.get('nivel_critico'):
+        nc = float(today['nivel_critico'])
+        # Evitar duplicar si ya está en soportes/resistencias
+        if not any(abs(x['nivel'] - nc) < 0.5 for x in niveles):
+            niveles.append({'nivel': nc, 'tipo': 'pivote'})
+
+    # Ordenados de mayor a menor para facilitar buscar el siguiente nivel
+    return sorted(niveles, key=lambda x: x['nivel'], reverse=True)
+
 
 
 # ─────────────────────────────────────────────
@@ -114,27 +127,36 @@ def is_price_at_level(precio_es: float, nivel: float, tolerancia: float = None) 
     return abs(precio_es - nivel) <= tol
 
 
-def determinar_lado(precio_es: float, nivel: float, bias: str) -> str | None:
+def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None:
     """
-    Determina si el precio está llegando a soporte o resistencia.
-    Combina la posición del precio con el bias del día.
+    Decide la dirección del trade según el TIPO de nivel y el bias.
 
-    Returns:
-        'long'  → precio en soporte con bias bullish (o neutral)
-        'short' → precio en resistencia con bias bearish (o neutral)
-        None    → no hay setup claro
+    Lógica level-to-level de Adam:
+      - Soporte tocado     → long  (si el bias no es bearish)
+      - Resistencia tocada → short (si el bias no es bullish)
+      - Pivote (crítico)   → según de qué lado esté el precio
+
+    Esto reemplaza la lógica anterior que solo miraba si precio <= nivel,
+    lo que generaba longs en resistencias.
     """
-    if bias == 'bullish':
-        # Bias alcista: buscamos longs en soporte
-        if precio_es <= nivel:
-            return 'long'
-    elif bias == 'bearish':
-        # Bias bajista: buscamos shorts en resistencia
+    tipo  = nivel_info['tipo']
+    nivel = nivel_info['nivel']
+
+    if tipo == 'soporte':
+        # Long en soporte, salvo que el día sea claramente bajista
+        return 'long' if bias != 'bearish' else None
+
+    if tipo == 'resistencia':
+        # Short en resistencia, salvo que el día sea claramente alcista
+        return 'short' if bias != 'bullish' else None
+
+    if tipo == 'pivote':
+        # El nivel crítico funciona como bisagra:
+        # precio por encima → actúa de soporte; por debajo → de resistencia
         if precio_es >= nivel:
-            return 'short'
-    elif bias in ('neutral', 'mixed', 'unknown'):
-        # Sin bias claro: el precio llega al nivel por cualquier lado
-        return 'long' if precio_es <= nivel else 'short'
+            return 'long' if bias != 'bearish' else None
+        else:
+            return 'short' if bias != 'bullish' else None
 
     return None
 
@@ -296,8 +318,10 @@ def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) 
     Formatea la señal como un mensaje de Telegram.
     Mismo formato que usaremos en la Fase 6.
     """
-    dir_emoji = '🟢' if señal.get('entrar') and 'long' in señal.get('razon', '').lower() else '🔴'
-    dir_texto = 'LONG' if dir_emoji == '🟢' else 'SHORT'
+    # Usar la dirección real guardada en la señal, no adivinarla del texto
+    es_long   = señal.get('direccion', 'long') == 'long'
+    dir_emoji = '🟢' if es_long else '🔴'
+    dir_texto = 'LONG' if es_long else 'SHORT'
 
     entrada = señal.get('entrada_es', nivel)
     stop    = señal.get('stop_es', '')
@@ -403,23 +427,19 @@ class SignalEngine:
         print(f"[{ahora}] SPY:{precio_spy:.2f} ES:{precio_es:.1f} | "
               f"Bias:{bias} | Niveles:{niveles[:4]}")
 
-        # ── 3. Comprobar cada nivel ───────────────────────────────────────
-        señal_enviada = False
+       # ── 3. Comprobar cada nivel (ahora son dicts con tipo) ────────────
+        señal_enviada = False  # inicializar ANTES del bucle para evitar UnboundLocalError
+        for nivel_info in niveles:
+            nivel = nivel_info['nivel']
 
-        for nivel in niveles:
             if not is_price_at_level(precio_es, nivel):
                 continue
-
             if self._esta_en_cooldown(nivel):
-                print(f"  ⏭️  Nivel {nivel} en cooldown")
                 continue
 
-            print(f"  🎯 Precio cerca de nivel {nivel}!")
-
-            # Determinar dirección del posible trade
-            direccion = determinar_lado(precio_es, nivel, bias)
+            # Dirección según tipo de nivel + bias (no solo posición del precio)
+            direccion = determinar_lado(precio_es, nivel_info, bias)
             if not direccion:
-                print(f"  ➖ Sin dirección clara para {nivel}")
                 continue
 
             # Velas de 15 minutos para confirmación técnica
@@ -443,15 +463,25 @@ class SignalEngine:
                 precio_es, nivel, direccion, today, bars_15, historico
             )
 
+            # Guardar la dirección real en la señal (no deducirla del texto LLM)
+            señal['direccion'] = direccion
+
+
             if señal.get('entrar'):
                 confianza = señal.get('confianza', 0)
                 print(f"  ✅ LLM: ENTRAR ({confianza:.0%} confianza)")
                 mensaje = formatear_alerta(señal, precio_es, nivel, today)
                 await enviar_alerta(mensaje)
-                self._marcar_señalado(nivel)
+                self._marcar_señalado(nivel)  # cooldown largo: 1 hora
                 señal_enviada = True
             else:
                 print(f"  ❌ LLM: No entrar — {señal.get('razon', '')[:80]}")
+                # Cooldown corto tras un "no": evita llamar al LLM cada 60s
+                # mientras el precio flota en el mismo nivel sin confirmación.
+                # Restamos 45 min → el cooldown efectivo es 15 min (= 1 vela de Adam)
+                self._last_signal[f"{nivel:.0f}"] = (
+                    datetime.now() - timedelta(minutes=45)
+                )
 
         return señal_enviada
 

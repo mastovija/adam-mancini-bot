@@ -174,8 +174,7 @@ async def scrape_historico():
     print(f"🆕 Nuevos en esta sesión: {nuevos_total:,}")
 
     if todos_tweets:
-        # Estadísticas
-        from datetime import datetime
+        # Estadísticas — datetime ya está importado al inicio del módulo
         def _parse(d):
             try: return datetime.strptime(d, '%a %b %d %H:%M:%S +0000 %Y')
             except: return datetime.min

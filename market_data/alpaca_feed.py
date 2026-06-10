@@ -264,15 +264,32 @@ class SPYFeed:
         """
         Obtiene todo lo necesario para el motor de señales en una sola llamada.
 
-        Returns:
-            Dict con precio SPY, equivalente ES, barra completa y timestamp
-            o None si hay error
+        Incluye guarda anti-precio-obsoleto: si la última barra de Alpaca
+        tiene más de 10 minutos (festivo NYSE no detectado, sin volumen IEX
+        en premarket, etc.), devuelve None para no disparar señales falsas.
         """
         bar = self.get_latest_bar()
         if not bar:
             return None
 
-        spy_price    = bar['close']
+        # ── Guarda contra precios obsoletos ──────────────────────────────
+        # Alpaca devuelve la última barra disponible aunque sea de hace horas.
+        # Más de 10 minutos de antigüedad = dato no fiable para señales.
+        if bar.get('timestamp'):
+            try:
+                bar_ts = datetime.fromisoformat(bar['timestamp'])
+                # Hacer timezone-aware si no lo es
+                if bar_ts.tzinfo is None:
+                    bar_ts = bar_ts.replace(tzinfo=pytz.UTC)
+                ahora_utc = datetime.now(pytz.UTC)
+                edad_segundos = (ahora_utc - bar_ts).total_seconds()
+                if edad_segundos > 600:  # 10 minutos
+                    print(f"  ⚠️  Barra obsoleta ({edad_segundos/60:.0f} min) — ignorando")
+                    return None
+            except Exception:
+                pass  # Si no podemos parsear el timestamp, continuamos
+
+        spy_price     = bar['close']
         es_equivalent = self.spy_to_es(spy_price)
 
         return {

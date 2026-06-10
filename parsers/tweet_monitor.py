@@ -22,15 +22,18 @@ CÓMO FUNCIONA:
 import asyncio
 import json
 import sys
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from bot.telegram_alerts import TelegramAlerter
-
+# IMPORTANTE: añadir la raíz del proyecto al path ANTES de importar
+# cualquier módulo propio (bot, config...). Si no, ejecutar este
+# archivo directamente falla con ModuleNotFoundError.
+sys.path.append(str(Path(__file__).parent.parent))
 
 import anthropic
 import pytz
 
-sys.path.append(str(Path(__file__).parent.parent))
+from bot.telegram_alerts import TelegramAlerter
 
 from config import (
     TWITTER_TARGET,
@@ -193,7 +196,6 @@ def clasificar_tweet(texto: str, fecha: str) -> dict:
         )
         raw = response.content[0].text.strip()
         # Limpiar markdown si aparece
-        import re
         raw = re.sub(r'^```(?:json)?\s*', '', raw)
         raw = re.sub(r'\s*```$', '', raw)
         return json.loads(raw)
@@ -243,6 +245,12 @@ async def monitorizar():
         ahora_str = datetime.now().strftime('%H:%M:%S')
         en_mercado = en_horario_mercado()
 
+        # Resetear tweets_hoy si cambió el día (evita que el estado crezca sin límite)
+        hoy = datetime.now().strftime('%Y-%m-%d')
+        if estado.get('fecha_hoy') != hoy:
+            estado['tweets_hoy'] = []
+            estado['fecha_hoy']  = hoy
+
         print(f"[{ahora_str}] Comprobando tweets... "
               f"({'🟢 mercado abierto' if en_mercado else '🔴 fuera de mercado'})")
 
@@ -254,19 +262,27 @@ async def monitorizar():
                 print(f"  ⚠️  Sin datos — posible problema de conexión")
             else:
                 # ── Filtrar tweets nuevos ─────────────────────────────────
+                # Ordenar por ID numérico descendente PRIMERO.
+                # La API devuelve el tweet fijado el primero aunque sea antiguo,
+                # lo que rompía tanto el 'break' como el registro del último ID.
+                tweets_recientes.sort(
+                    key=lambda t: int(t.get('id', 0)), reverse=True
+                )
+
                 ultimo_id = estado.get('ultimo_tweet_id')
                 tweets_nuevos = []
 
                 for tweet in tweets_recientes:
                     if not tweet.get('id'):
                         continue
-                    if ultimo_id and tweet['id'] <= ultimo_id:
-                        break  # Los tweets vienen ordenados del más nuevo al más viejo
+                    # Comparar como enteros (los IDs de Twitter son números grandes)
+                    if ultimo_id and int(tweet['id']) <= int(ultimo_id):
+                        break
                     tweets_nuevos.append(tweet)
 
-                # Actualizar último tweet visto
+                # Guardar el tweet más reciente (ahora sí es el primero tras ordenar)
                 if tweets_recientes:
-                    estado['ultimo_tweet_id'] = tweets_recientes[0]['id']
+                    estado['ultimo_tweet_id'] = str(tweets_recientes[0]['id'])
                     estado['ultimo_check']     = datetime.now().isoformat()
 
                 # ── Procesar tweets nuevos ────────────────────────────────
