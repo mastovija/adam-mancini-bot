@@ -9,9 +9,6 @@ Envía tres tipos de mensajes al móvil:
 
 USO (test rápido):
     python bot/telegram_alerts.py
-
-Para conectar al motor de señales, importa TelegramAlerter y úsalo
-en signal_engine.py y tweet_monitor.py (ver al final del archivo).
 """
 
 import asyncio
@@ -37,6 +34,37 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
+def _format_levels(levels: list, max_show: int = 12) -> str:
+    """
+    Formatea una lista de niveles para Telegram.
+    Limita a max_show niveles para no saturar el mensaje,
+    indicando cuántos quedan ocultos si hay más.
+    """
+    if not levels:
+        return ''
+    visible = [str(int(n)) for n in levels[:max_show] if n]
+    result  = ' · '.join(visible)
+    if len(levels) > max_show:
+        result += f" <i>(+{len(levels) - max_show} más)</i>"
+    return result
+
+
+def _fecha_legible(fecha_raw: str) -> str:
+    """Convierte '2026-06-09' en 'Mar 9 Jun'."""
+    try:
+        fecha_obj = datetime.strptime(fecha_raw, '%Y-%m-%d')
+        dias  = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+        meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+        return f"{dias[fecha_obj.weekday()]} {fecha_obj.day} {meses[fecha_obj.month-1]}"
+    except Exception:
+        return fecha_raw
+
+
+# ─────────────────────────────────────────────
 # Clase principal
 # ─────────────────────────────────────────────
 
@@ -56,10 +84,7 @@ class TelegramAlerter:
         self.chat_id = TELEGRAM_CHAT_ID
 
     async def send(self, text: str, parse_mode: str = ParseMode.HTML):
-        """
-        Envía un mensaje al chat configurado.
-        Usa HTML para el formato (negrita, cursiva, monospace).
-        """
+        """Envía un mensaje al chat configurado."""
         try:
             await self.bot.send_message(
                 chat_id    = self.chat_id,
@@ -76,37 +101,24 @@ class TelegramAlerter:
     async def send_morning_briefing(self, today: dict):
         """
         Envía el resumen del newsletter al empezar el día.
-        Se llama desde newsletter_parser.py a las 7:30 AM EST.
 
-        Formato:
-            📋 PLAN DE ADAM — Lunes 9 Jun
-            ─────────────────────────────
-            Bias:     🟢 BULLISH
-            Crítico:  7,527
-            Soportes: 7,326 · 7,410 · 7,458
-            ...
+        Muestra hasta 12 soportes y 12 resistencias para no saturar
+        el mensaje (con nota "+N más" si hay más).
+        El texto de setup e invalida se muestra completo — sin cortes.
         """
         bias     = today.get('bias', 'unknown').upper()
         bias_emo = {'BULLISH': '🟢', 'BEARISH': '🔴', 'NEUTRAL': '⚪', 'MIXED': '🟡'}.get(bias, '❓')
 
-        # Formatear niveles como lista con punto de separación
-        soportes   = ' · '.join(str(int(n)) for n in today.get('soportes', []) if n)
-        resistencias = ' · '.join(str(int(n)) for n in today.get('resistencias', []) if n)
+        fecha_str    = _fecha_legible(today.get('date', ''))
+        titulo       = html.escape(today.get('title', '')[:70])
 
-        # Fecha legible
-        fecha_raw = today.get('date', str(datetime.today().date()))
-        try:
-            fecha_obj = datetime.strptime(fecha_raw, '%Y-%m-%d')
-            dias_es   = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-            meses_es  = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
-                         'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-            fecha_str = f"{dias_es[fecha_obj.weekday()]} {fecha_obj.day} {meses_es[fecha_obj.month-1]}"
-        except Exception:
-            fecha_str = fecha_raw
+        # Niveles — limitados a 12 por tipo para no saturar
+        soportes_str    = _format_levels(today.get('soportes', []),    max_show=12)
+        resistencias_str = _format_levels(today.get('resistencias', []), max_show=12)
 
-        titulo  = html.escape(today.get('title', '')[:60])
-        setup   = html.escape((today.get('setup') or '')[:150])
-        invalida = html.escape((today.get('invalida_si') or '')[:100])
+        # Texto completo — sin cortes (Telegram admite hasta 4096 chars por mensaje)
+        setup    = html.escape(today.get('setup')      or '')
+        invalida = html.escape(today.get('invalida_si') or '')
 
         lineas = [
             f"📋 <b>PLAN DE ADAM — {fecha_str}</b>",
@@ -115,19 +127,22 @@ class TelegramAlerter:
         if titulo:
             lineas.append(f"📰 <i>{titulo}</i>\n")
 
-        lineas += [
-            f"Bias:      {bias_emo} <b>{bias}</b>",
-        ]
+        lineas.append(f"Bias:     {bias_emo} <b>{bias}</b>")
+
         if today.get('nivel_critico'):
-            lineas.append(f"Crítico:   <b>{int(today['nivel_critico'])}</b>")
-        if soportes:
-            lineas.append(f"Soportes:  {soportes}")
-        if resistencias:
-            lineas.append(f"Resists:   {resistencias}")
+            lineas.append(f"Crítico:  <b>{int(today['nivel_critico'])}</b>")
+
+        if soportes_str:
+            lineas.append(f"🟩 Soportes:\n{soportes_str}")
+
+        if resistencias_str:
+            lineas.append(f"🟥 Resists:\n{resistencias_str}")
+
         if setup:
-            lineas += ["", f"💭 {setup}"]
+            lineas += ["", f"💭 <b>Setup:</b> {setup}"]
+
         if invalida:
-            lineas.append(f"⚠️ Invalida si: {invalida}")
+            lineas += ["", f"⚠️ <b>Invalida si:</b> {invalida}"]
 
         if not today.get('is_complete'):
             lineas += ["", "💡 <i>Preview — suscríbete para análisis completo</i>"]
@@ -141,24 +156,13 @@ class TelegramAlerter:
     async def send_signal_alert(self, señal: dict, precio_es: float, nivel: float, today: dict):
         """
         Envía una alerta de trading cuando el motor detecta un setup.
-        Incluye entrada, stop loss, targets y ratio R/R.
 
-        Formato:
-            🟢 LONG ES — Adam Mancini
-            ──────────────────────────
-            📍 Entrada:   7,527
-            🛑 Stop:      7,508
-            🎯 Target 1:  7,604
-            🎯 Target 2:  7,620
-            📐 R/R:       1:4.1
-            ──────────────────────────
-            💭 Failed breakdown en 7527...
-            🎯 Confianza: 82%  ⏰ 14:32
+        Usa señal['direccion'] (guardado por signal_engine.py) para
+        determinar LONG/SHORT — no lo deduce del texto de la razón,
+        que puede estar en español y ser poco fiable.
         """
-        # Determinar dirección desde la razón o datos
-        razon = (señal.get('razon') or '').lower()
-        es_long = 'long' in razon or señal.get('entrada_es', nivel) <= nivel
-
+        # Dirección real desde signal_engine.py (no deducida del texto)
+        es_long  = señal.get('direccion', 'long') == 'long'
         dir_emo  = '🟢' if es_long else '🔴'
         dir_text = 'LONG' if es_long else 'SHORT'
 
@@ -169,19 +173,19 @@ class TelegramAlerter:
         conf    = señal.get('confianza', 0)
 
         # Ratio R/R
-        rr_linea = ''
+        rr_str = ''
         if entrada and stop and t1:
             riesgo  = abs(float(entrada) - float(stop))
             reward1 = abs(float(t1) - float(entrada))
             if riesgo > 0:
-                rr = reward1 / riesgo
-                rr_linea = f"\n📐 R/R:       1:{rr:.1f}"
+                rr_str = f"📐 R/R:       1:{reward1/riesgo:.1f}\n"
 
         # Hora EST
         tz_ny = pytz.timezone(MARKET_TIMEZONE)
         hora  = datetime.now(tz_ny).strftime('%H:%M')
 
-        razon_escaped = html.escape((señal.get('razon') or '')[:150])
+        # Razón completa — sin cortes
+        razon = html.escape(señal.get('razon') or '')
 
         lineas = [
             f"{dir_emo} <b>{dir_text} ES — Adam Mancini</b>",
@@ -196,12 +200,13 @@ class TelegramAlerter:
             lineas.append(f"🎯 Target 2:  <b>{t2}</b>")
 
         lineas.append("─" * 28)
-        if rr_linea:
-            lineas.append(rr_linea.strip())
+
+        if rr_str:
+            lineas.append(rr_str.strip())
 
         lineas += [
-            f"📊 Nivel:     {int(nivel)} | Bias: {today.get('bias','?').upper()}",
-            f"💭 {razon_escaped}",
+            f"📊 Nivel: {int(nivel)} | Bias: {today.get('bias','?').upper()}",
+            f"💭 {razon}",
             f"🎯 Confianza: <b>{conf:.0%}</b>  ⏰ {hora} EST",
         ]
 
@@ -215,23 +220,19 @@ class TelegramAlerter:
         """
         Envía alerta cuando Adam publica un tweet accionable.
         Incluye el texto original + los niveles extraídos.
-
-        Formato:
-            ⚡ ADAM TWEETEA — SEÑAL
-            ──────────────────────────
-            "ES holding 7527 long here..."
-            ──────────────────────────
-            🟢 LONG | Entrada: 7527 | SL: 7508 | TP: 7604
         """
         tipo    = clasificacion.get('tipo', 'comentario')
         accion  = clasificacion.get('accionable', False)
 
         tipo_emo = {'senal': '⚡', 'nivel': '📍', 'comentario': '💬'}.get(tipo, '🐦')
-        tipo_txt = {'senal': 'SEÑAL ACCIONABLE', 'nivel': 'ACTUALIZACIÓN NIVELES',
-                    'comentario': 'COMENTARIO'}.get(tipo, tipo.upper())
+        tipo_txt = {
+            'senal':      'SEÑAL ACCIONABLE',
+            'nivel':      'ACTUALIZACIÓN NIVELES',
+            'comentario': 'COMENTARIO',
+        }.get(tipo, tipo.upper())
 
-        texto   = html.escape((tweet.get('text') or '')[:300])
-        resumen = html.escape((clasificacion.get('resumen') or '')[:100])
+        texto   = html.escape(tweet.get('text') or '')
+        resumen = html.escape(clasificacion.get('resumen') or '')
 
         hora_raw = tweet.get('created_at', '')
         hora_str = hora_raw[11:16] if len(hora_raw) > 15 else ''
@@ -246,7 +247,6 @@ class TelegramAlerter:
         if resumen:
             lineas.append(f"📊 {resumen}")
 
-        # Si es señal accionable, añadir detalles
         if accion:
             direccion = (clasificacion.get('direccion') or '').upper()
             entrada   = clasificacion.get('entrada')
@@ -254,15 +254,15 @@ class TelegramAlerter:
             target    = clasificacion.get('target')
 
             if direccion and entrada:
-                dir_emo = '🟢' if direccion == 'LONG' else '🔴'
+                dir_emo   = '🟢' if direccion == 'LONG' else '🔴'
                 trade_str = f"{dir_emo} {direccion}"
                 if entrada: trade_str += f" | Entrada: {entrada}"
                 if stop:    trade_str += f" | SL: {stop}"
                 if target:  trade_str += f" | TP: {target}"
-                lineas.append(f"\n<b>{trade_str}</b>")
+                lineas += ["", f"<b>{trade_str}</b>"]
 
         if hora_str:
-            lineas.append(f"\n⏰ {hora_str} UTC")
+            lineas += ["", f"⏰ {hora_str} UTC"]
 
         await self.send('\n'.join(lineas))
 
@@ -274,7 +274,6 @@ class TelegramAlerter:
         """Envía un mensaje de prueba para verificar la conexión."""
         tz_ny = pytz.timezone(MARKET_TIMEZONE)
         hora  = datetime.now(tz_ny).strftime('%H:%M EST')
-
         await self.send(
             f"✅ <b>Bot Adam Mancini — Conectado</b>\n\n"
             f"Hora: {hora}\n"
@@ -282,7 +281,7 @@ class TelegramAlerter:
             f"Recibirás alertas cuando:\n"
             f"• El precio toque un nivel de Adam\n"
             f"• Adam publique un tweet accionable\n"
-            f"• Newsletter de mañana esté listo"
+            f"• El newsletter de mañana esté listo"
         )
         print("✅ Mensaje de prueba enviado a Telegram")
 
@@ -292,68 +291,62 @@ class TelegramAlerter:
 # ─────────────────────────────────────────────
 
 async def main():
-    """
-    Prueba la conexión y todos los tipos de mensaje.
-    Ejecuta: python bot/telegram_alerts.py
-    """
     print("=" * 50)
     print("  Test Telegram — Bot Adam Mancini")
     print("=" * 50)
 
     alerter = TelegramAlerter()
 
-    # 1. Test básico
     print("📱 Enviando mensaje de prueba...")
     await alerter.send_test()
-
     await asyncio.sleep(1)
 
-    # 2. Simular briefing matutino
     print("📋 Enviando briefing de ejemplo...")
     today_ejemplo = {
-        'date':         '2026-06-09',
-        'title':        'SPX Continues To Coil. Another Big Move Coming?',
-        'bias':         'bullish',
-        'nivel_critico': 7527,
-        'soportes':     [7326, 7410, 7458],
-        'resistencias': [7527, 7604, 7620],
-        'setup':        'Failed Breakdown en 7527. Mantener abre camino a 7604.',
-        'invalida_si':  'Perder 7326 de forma sostenida',
-        'is_complete':  False,
+        'date':          '2026-06-10',
+        'title':         'Has SPX Moved Into Sell Bounces Mode? June 11 Plan',
+        'bias':          'mixed',
+        'nivel_critico':  7390,
+        'soportes':      [7308, 7280, 7247, 7215, 7200, 7160],
+        'resistencias':  [7311, 7320, 7327, 7332, 7344, 7354, 7358, 7364, 7370,
+                          7377, 7383, 7390, 7401, 7410, 7415, 7420, 7432, 7438,
+                          7451, 7458, 7465, 7472, 7478, 7487, 7495, 7501, 7508,
+                          7517, 7527, 7538, 7550, 7558, 7565, 7570, 7577, 7588,
+                          7593, 7604, 7620, 7630, 7638, 7643, 7651],
+        'setup':         'Mode 2 rangebound (7308-7390). El mercado requiere recuperación de 7390 para confirmar control alcista y acceso a 7527; caída bajo 7296 activa caso bajista con breakdown trades.',
+        'invalida_si':   'Cierre sostenido bajo 7296 invalida el bias alcista e inicia caso bajista; o recuperación sostenida sobre 7390 que alcance 7527 confirma ruptura alcista.',
+        'is_complete':   True,
     }
     await alerter.send_morning_briefing(today_ejemplo)
-
     await asyncio.sleep(1)
 
-    # 3. Simular señal
     print("⚡ Enviando señal de ejemplo...")
     señal_ejemplo = {
         'entrar':     True,
-        'razon':      'Long en soporte 7527. Bias bullish del newsletter. Vela 15min confirma bounce.',
-        'entrada_es': 7527,
-        'stop_es':    7508,
-        'target1_es': 7604,
-        'target2_es': 7620,
-        'confianza':  0.82,
+        'direccion':  'long',
+        'razon':      'Failed Breakdown en 7308. Bias mixed pero soporte mayor. Vela 15min confirma bounce. Contexto histórico similar muestra 70% de continuación alcista desde este nivel.',
+        'entrada_es': 7308,
+        'stop_es':    7290,
+        'target1_es': 7358,
+        'target2_es': 7390,
+        'confianza':  0.78,
     }
-    await alerter.send_signal_alert(señal_ejemplo, 7530.0, 7527, today_ejemplo)
-
+    await alerter.send_signal_alert(señal_ejemplo, 7310.0, 7308, today_ejemplo)
     await asyncio.sleep(1)
 
-    # 4. Simular tweet
     print("🐦 Enviando alerta de tweet de ejemplo...")
-    tweet_ejemplo = {
-        'text':       'ES holding 7527 long here target 7604 stop 7508. Failure loses 7410',
-        'created_at': '2026-06-09T14:32:00+00:00',
+    tweet_ejemplo  = {
+        'text':       'ES holding 7308 long here target 7358 stop 7290. Failed breakdown. If loses 7290 adds more risk.',
+        'created_at': '2026-06-10T14:32:00+00:00',
     }
     clasif_ejemplo = {
         'tipo':       'senal',
         'accionable': True,
         'direccion':  'long',
-        'entrada':    7527,
-        'stop':       7508,
-        'target':     7604,
-        'resumen':    'Long en 7527 con target 7604 y stop 7508',
+        'entrada':    7308,
+        'stop':       7290,
+        'target':     7358,
+        'resumen':    'Long en 7308 con target 7358 y stop 7290',
     }
     await alerter.send_tweet_alert(tweet_ejemplo, clasif_ejemplo)
 

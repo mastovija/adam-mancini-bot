@@ -1,21 +1,21 @@
 """
 signals/signal_engine.py — Motor de señales: el corazón del bot
 ================================================================
-Une todas las piezas del proyecto para detectar señales de Adam Mancini:
+Une todas las piezas del proyecto para detectar señales de Adam Mancini.
 
-1. Lee today.json → niveles y bias del newsletter de hoy
-2. Obtiene precio SPY cada 60 segundos → convierte a ES
-3. Detecta cuando el precio está en un nivel de Adam
-4. Pide confirmación a la vela de 15 minutos (timeframe de Adam)
-5. Consulta ChromaDB → busca situaciones históricas similares
-6. Pregunta al LLM: "¿entraría Adam aquí?" con todo el contexto
-7. Si sí → genera alerta con entrada, stop y target
+FUENTES DE INFORMACIÓN (por orden de importancia):
+  1. Newsletter de hoy (content_plan) — las palabras EXACTAS de Adam
+     sobre qué niveles son accionables y en qué condiciones
+  2. Tweets de Adam del día — actualizaciones en tiempo real
+  3. Metodología de Adam (en el prompt) — base fija siempre aplicada
+  4. Precio SPY/ES en tiempo real — para detectar cuándo se acerca a un nivel
+  5. Velas de 15min — confirmación técnica y detección de Failed Breakdown
 
-La lógica de entrada replica el estilo de Adam:
-  - LONG:  precio llega a soporte, vela 15min cierra por encima → entrada
-  - SHORT: precio llega a resistencia, vela 15min cierra por debajo → entrada
-  - Stop:  siguiente nivel en contra
-  - Target: siguiente nivel a favor
+LÓGICA DE ENTRADA:
+  - Detecta when el precio está cerca de un nivel del newsletter
+  - Analiza si hay un Failed Breakdown real (flush + recovery, no chop)
+  - Pasa el plan completo de Adam + sus tweets del día al LLM
+  - El LLM (con las palabras exactas de Adam) decide si es una entrada válida
 
 USO:
     python signals/signal_engine.py
@@ -27,9 +27,8 @@ import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-# IMPORTANTE: añadir la raíz del proyecto al path ANTES de importar
-# cualquier módulo propio (bot, config, market_data...). Si no,
-# ejecutar este archivo directamente falla con ModuleNotFoundError.
+
+# IMPORTANTE: añadir la raíz del proyecto al path ANTES de importar módulos propios
 sys.path.append(str(Path(__file__).parent.parent))
 
 import anthropic
@@ -46,14 +45,14 @@ from config import (
     MARKET_TIMEZONE,
 )
 from market_data.alpaca_feed import SPYFeed, is_market_open
-from knowledge_base.vectordb import get_collection, query_similar
 
 
 # ─────────────────────────────────────────────
 # Rutas
 # ─────────────────────────────────────────────
-TODAY_FILE   = DATA_DIR / 'daily' / 'today.json'
-STATE_FILE   = DATA_DIR / 'signal_engine_state.json'
+TODAY_FILE  = DATA_DIR / 'daily' / 'today.json'
+STATE_FILE  = DATA_DIR / 'signal_engine_state.json'
+TWEETS_FILE = DATA_DIR / 'tweet_monitor_state.json'
 
 
 # ─────────────────────────────────────────────
@@ -63,7 +62,8 @@ STATE_FILE   = DATA_DIR / 'signal_engine_state.json'
 def load_today() -> dict | None:
     """
     Carga el mapa del día generado por el newsletter parser.
-    Contiene: bias, nivel_critico, soportes, resistencias, setup.
+    El campo más importante es 'content_plan': el Trade Plan completo
+    en las palabras exactas de Adam.
     """
     if not TODAY_FILE.exists():
         print("  ⚠️  today.json no existe — ejecuta primero newsletter_parser.py")
@@ -72,26 +72,25 @@ def load_today() -> dict | None:
     with open(TODAY_FILE) as f:
         data = json.load(f)
 
-    # Avisar si el newsletter es de hace más de 2 días
     if data.get('date'):
         dias = (datetime.now().date() -
                 datetime.strptime(data['date'], '%Y-%m-%d').date()).days
         if dias > 2:
             print(f"  ⚠️  today.json tiene {dias} días de antigüedad")
 
+    # Verificar que tenemos el plan completo
+    content_len = len(data.get('content_plan', ''))
+    if content_len < 500:
+        print(f"  ⚠️  content_plan muy corto ({content_len} chars) — "
+              f"ejecuta: python parsers/newsletter_parser.py --force")
+
     return data
 
 
 def get_all_levels(today: dict) -> list:
     """
-    Extrae los niveles del mapa del día CONSERVANDO su tipo.
-
-    Antes devolvíamos una lista plana de números y perdíamos la información
-    de si cada nivel era soporte o resistencia — eso provocaba longs en
-    resistencias. Ahora cada nivel es un dict: {'nivel': 7527.0, 'tipo': 'soporte'}
-
-    El nivel crítico se marca como 'pivote': actúa de soporte si el precio
-    está por encima, y de resistencia si está por debajo.
+    Extrae los niveles del mapa del día conservando su tipo.
+    Devuelve lista de dicts: {{'nivel': float, 'tipo': 'soporte'|'resistencia'|'pivote'}}
     """
     niveles = []
 
@@ -105,13 +104,72 @@ def get_all_levels(today: dict) -> list:
 
     if today.get('nivel_critico'):
         nc = float(today['nivel_critico'])
-        # Evitar duplicar si ya está en soportes/resistencias
         if not any(abs(x['nivel'] - nc) < 0.5 for x in niveles):
             niveles.append({'nivel': nc, 'tipo': 'pivote'})
 
-    # Ordenados de mayor a menor para facilitar buscar el siguiente nivel
     return sorted(niveles, key=lambda x: x['nivel'], reverse=True)
 
+
+# ─────────────────────────────────────────────
+# Tweets del día
+# ─────────────────────────────────────────────
+
+def get_todays_tweets() -> list:
+    """
+    Lee los tweets de Adam del día actual desde el estado del tweet monitor.
+    El tweet_monitor.py los guarda en tweet_monitor_state.json.
+    Returns: lista de dicts con 'text', 'created_at', etc.
+    """
+    if not TWEETS_FILE.exists():
+        return []
+
+    try:
+        state = json.load(open(TWEETS_FILE, encoding='utf-8'))
+        hoy   = datetime.now().strftime('%Y-%m-%d')
+
+        # Solo tweets del día de hoy
+        if state.get('fecha_hoy') != hoy:
+            return []
+
+        tweets_hoy = state.get('tweets_hoy', [])
+        tweets = []
+        for item in tweets_hoy:
+            if isinstance(item, dict):
+                # El estado guarda {'tweet': {...}, 'clasificacion': {...}}
+                tweet = item.get('tweet', item)
+                if tweet.get('text') and not tweet.get('is_retweet'):
+                    tweets.append(tweet)
+        return tweets
+    except Exception:
+        return []
+
+
+def formatear_tweets_para_prompt(tweets: list) -> str:
+    """
+    Formatea los tweets de Adam del día para el prompt del LLM.
+    Incluye los últimos 12 tweets con texto y hora.
+    """
+    if not tweets:
+        return "No hay tweets de Adam todavía hoy."
+
+    lines = []
+    for tweet in tweets[-12:]:
+        texto = tweet.get('text', '').strip()
+        if not texto:
+            continue
+
+        hora = ''
+        created = tweet.get('created_at', '')
+        if created:
+            try:
+                dt   = datetime.strptime(created, '%a %b %d %H:%M:%S +0000 %Y')
+                hora = f" [{dt.strftime('%H:%M')} UTC]"
+            except Exception:
+                pass
+
+        lines.append(f"• {texto}{hora}")
+
+    return '\n'.join(lines) if lines else "No hay tweets de Adam todavía hoy."
 
 
 # ─────────────────────────────────────────────
@@ -119,117 +177,204 @@ def get_all_levels(today: dict) -> list:
 # ─────────────────────────────────────────────
 
 def is_price_at_level(precio_es: float, nivel: float, tolerancia: float = None) -> bool:
-    """
-    Comprueba si el precio ES está dentro de la tolerancia de un nivel.
-    Tolerancia por defecto: LEVEL_TOLERANCE_POINTS de config.py (3 puntos).
-    """
+    """Comprueba si el precio ES está dentro de la tolerancia de un nivel."""
     tol = tolerancia or LEVEL_TOLERANCE_POINTS
     return abs(precio_es - nivel) <= tol
 
 
 def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None:
     """
-    Decide la dirección del trade según el TIPO de nivel y el bias.
-
-    Lógica level-to-level de Adam:
-      - Soporte tocado     → long  (si el bias no es bearish)
-      - Resistencia tocada → short (si el bias no es bullish)
-      - Pivote (crítico)   → según de qué lado esté el precio
-
-    Esto reemplaza la lógica anterior que solo miraba si precio <= nivel,
-    lo que generaba longs en resistencias.
+    Decide la dirección del trade según el tipo de nivel y el bias.
+    Adam no va short → resistencias devuelven None.
     """
-    tipo  = nivel_info['tipo']
-    nivel = nivel_info['nivel']
+    tipo = nivel_info['tipo']
 
     if tipo == 'soporte':
-        # Long en soporte, salvo que el día sea claramente bajista
         return 'long' if bias != 'bearish' else None
 
     if tipo == 'resistencia':
-        # Short en resistencia, salvo que el día sea claramente alcista
-        return 'short' if bias != 'bullish' else None
+        # Adam no va short en ES — las resistencias son para contexto
+        return None
 
     if tipo == 'pivote':
-        # El nivel crítico funciona como bisagra:
-        # precio por encima → actúa de soporte; por debajo → de resistencia
+        nivel = nivel_info['nivel']
         if precio_es >= nivel:
             return 'long' if bias != 'bearish' else None
         else:
-            return 'short' if bias != 'bullish' else None
+            return None  # No short
 
     return None
 
 
 def confirmar_con_vela_15min(bars_15: list, nivel: float, direccion: str) -> bool:
     """
-    Confirma el setup usando la vela de 15 minutos.
-    Este es el timeframe principal de Adam ("98% de mi tiempo").
-
-    Criterios de confirmación:
-    - LONG:  último cierre 15min > apertura (vela verde) Y precio por encima del nivel
-    - SHORT: último cierre 15min < apertura (vela roja) Y precio por debajo del nivel
-
-    Args:
-        bars_15:   lista de barras de 15 minutos (más reciente al final)
-        nivel:     nivel de precio en ES
-        direccion: 'long' o 'short'
-
-    Returns:
-        True si la vela confirma el setup
+    Confirma el setup usando la vela de 15 minutos (timeframe principal de Adam).
+    LONG: último cierre > apertura (vela verde) Y precio por encima del nivel.
     """
     if not bars_15:
-        return False  # Sin datos, no confirmamos
+        return False
 
     ultima_vela = bars_15[-1]
     close = ultima_vela['close'] * SPY_TO_ES_MULTIPLIER
     open_ = ultima_vela['open'] * SPY_TO_ES_MULTIPLIER
 
     if direccion == 'long':
-        # Vela alcista (cierre > apertura) y precio por encima del soporte
         return close > open_ and close >= nivel
 
-    elif direccion == 'short':
-        # Vela bajista (cierre < apertura) y precio por debajo de resistencia
-        return close < open_ and close <= nivel
-
     return False
+
+
+def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
+    """
+    Detecta si ha habido un Failed Breakdown reciente en el nivel.
+
+    Secuencia requerida (en orden cronológico en las últimas 8 barras):
+    1. Precio estuvo ENCIMA del nivel (+5 pts al menos)
+    2. Flush por DEBAJO del nivel (al menos 5 pts)
+    3. Precio actual recuperado ENCIMA del nivel
+
+    Sin este patrón Adam NO entra aunque el precio esté "en un nivel".
+
+    Returns:
+        dict con 'es_fb', 'flush_size', 'bars_ago', 'descripcion'
+    """
+    if not bars_15 or len(bars_15) < 2:
+        return {
+            'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
+            'descripcion': 'Sin datos de velas suficientes'
+        }
+
+    m                = SPY_TO_ES_MULTIPLIER
+    precio_actual_es = bars_15[-1]['close'] * m
+
+    # Recovery: precio actual encima del nivel
+    if precio_actual_es <= nivel:
+        return {
+            'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
+            'descripcion': (
+                f'Precio {precio_actual_es:.0f} por debajo de {nivel:.0f} — '
+                f'recovery aún no completada'
+            )
+        }
+
+    # Buscar secuencia above → flush en las últimas 8 barras (oldest → newest)
+    was_above = False
+
+    for i in range(1, min(9, len(bars_15))):
+        bar      = bars_15[-i]
+        close_es = bar['close'] * m
+        low_es   = bar['low']   * m
+
+        if not was_above:
+            if close_es > nivel + 5:
+                was_above = True
+            continue
+
+        if was_above and low_es < nivel - 5:
+            flush_size = round(nivel - low_es, 1)
+
+            if flush_size >= 20:
+                calidad = f'profundo ({flush_size:.0f} pts) — alta probabilidad'
+            elif flush_size >= 10:
+                calidad = f'moderado ({flush_size:.0f} pts)'
+            else:
+                calidad = f'shallow ({flush_size:.0f} pts)'
+
+            return {
+                'es_fb':       True,
+                'flush_size':  flush_size,
+                'bars_ago':    i,
+                'descripcion': (
+                    f'✅ FAILED BREAKDOWN: {calidad}, hace {i} velas ({i*15} min), '
+                    f'precio actual {precio_actual_es:.0f} recuperado encima de {nivel:.0f}'
+                )
+            }
+
+    return {
+        'es_fb':       False,
+        'flush_size':  0,
+        'bars_ago':    0,
+        'descripcion': (
+            f'⚠️ Sin Failed Breakdown: precio {precio_actual_es:.0f} encima de '
+            f'{nivel:.0f} pero sin secuencia elevator down → flush → recovery visible. '
+            f'Adam NO entraría aquí.'
+        )
+    }
 
 
 # ─────────────────────────────────────────────
 # Generación de señal con LLM
 # ─────────────────────────────────────────────
 
-SIGNAL_PROMPT = """Eres un experto en la metodología de trading de Adam Mancini en ES/SPX.
-Adam opera "level to level": entra en niveles clave, stop justo al otro lado, target en el siguiente nivel.
+SIGNAL_PROMPT = """Eres Adam Mancini analizando si debes entrar en un trade ahora mismo en ES futures.
 
-SITUACIÓN ACTUAL:
-- Precio ES: {precio_es}
-- Nivel clave: {nivel}
-- Dirección propuesta: {direccion}
-- Bias del día: {bias}
-- Nivel crítico del newsletter: {nivel_critico}
-- Soportes del día: {soportes}
-- Resistencias del día: {resistencias}
-- Setup del newsletter: {setup}
-- Invalida si: {invalida_si}
+══════════════════════════════════════════════════════════
+METODOLOGÍA (base fija, siempre aplica sin excepciones):
+══════════════════════════════════════════════════════════
+Tu ÚNICO setup de entrada es el Failed Breakdown:
+  1. Elevator down: precio cae vertical hacia un mínimo significativo
+  2. Flush DEBAJO del mínimo (trampa a los shorts, institucionales acumulan)
+  3. Recovery ENCIMA del mínimo → trigger de entrada
+  4. Esperar ACEPTACIÓN: precio intenta vender en el mínimo, falla, vuelve
+     O protocolo no-aceptación: precio 5+ pts encima sin parar
 
-VELA 15 MINUTOS (timeframe principal de Adam):
-- Open: {open_15} | High: {high_15} | Low: {low_15} | Close: {close_15}
-- Confirmación técnica: {confirmacion}
+Mínimo significativo válido: low del día anterior, low multi-hora (20+ pts), shelf de lows
 
-SITUACIONES HISTÓRICAS SIMILARES (de newsletters pasados):
-{historico}
+NUNCA:
+  - Knife catch (comprar en caída libre — esperar flush completo + recovery)
+  - Comprar un nivel "porque está ahí" sin ver el elevator down + flush
+  - Ir short en ES (solo longs vía Failed Breakdowns)
+  - Comprar niveles "tested to death" sin ver el trap y recovery
 
-¿Adam entraría en {direccion} aquí? Responde SOLO con JSON válido:
+Gestión: 75% beneficios en primer nivel, dejar runner libre de riesgo, stop bajo el flush mínimo
+
+══════════════════════════════════════════════════════════
+TU PLAN PARA HOY (newsletter completo — tus propias palabras):
+══════════════════════════════════════════════════════════
+{content_plan}
+
+══════════════════════════════════════════════════════════
+TUS TWEETS DE HOY (actualizaciones en tiempo real):
+══════════════════════════════════════════════════════════
+{tweets_hoy}
+
+══════════════════════════════════════════════════════════
+SITUACIÓN ACTUAL DE MERCADO:
+══════════════════════════════════════════════════════════
+Precio ES actual:  {precio_es}
+Nivel bajo análisis: {nivel}
+Dirección propuesta: {direccion}
+Bias del día:      {bias}
+
+ANÁLISIS DE FAILED BREAKDOWN EN ESTE NIVEL:
+{fb_descripcion}
+
+VELA 15 MINUTOS (tu timeframe principal):
+O:{open_15} H:{high_15} L:{low_15} C:{close_15}
+Confirmación técnica: {confirmacion}
+
+══════════════════════════════════════════════════════════
+EVALUACIÓN:
+══════════════════════════════════════════════════════════
+Basándote en TU newsletter de hoy y TU metodología, evalúa:
+
+1. ¿Este nivel ({nivel}) aparece en tu sección "I'd bid direct" o es un nivel accionable según tu plan?
+2. ¿Hay un Failed Breakdown real aquí? (elevator down visible + flush + recovery + aceptación)
+3. ¿Las condiciones del día (bias, contexto de 7390, etc.) apoyan esta entrada?
+4. ¿Qué dicen tus tweets de hoy sobre este nivel o situación?
+
+Si el nivel NO está en tu plan accionable, o NO hay FB real → entrar: false.
+Si el nivel está en tu plan Y hay FB real Y el contexto apoya → entrar: true.
+
+Responde SOLO con JSON válido, sin texto adicional:
 {{
   "entrar": true o false,
-  "razon": "una frase explicando la decisión",
-  "entrada_es": nivel ES de entrada (número),
-  "stop_es": nivel ES de stop loss (número),
-  "target1_es": primer target ES (número),
-  "target2_es": segundo target ES o null,
-  "confianza": valor entre 0.0 y 1.0
+  "razon": "cita tu newsletter o tweets y explica si hay FB real y por qué entra o no",
+  "entrada_es": precio ES de entrada (número),
+  "stop_es": stop ES (bajo el flush mínimo, máx 15 pts de riesgo),
+  "target1_es": primer target (siguiente nivel de tu newsletter),
+  "target2_es": segundo target o null,
+  "confianza": valor 0.0 a 1.0
 }}"""
 
 
@@ -239,65 +384,73 @@ def generar_señal_llm(
     direccion: str,
     today: dict,
     bars_15: list,
-    historico: list
+    fb_info: dict | None = None,
+    tweets: list | None = None,
 ) -> dict:
     """
-    Pregunta a Claude Haiku si Adam entraría en esta situación.
+    Pregunta al LLM si Adam entraría en esta situación.
 
-    Proporciona todo el contexto disponible:
-    - Mapa del día (newsletter)
-    - Vela de 15 minutos actual
-    - 3 situaciones históricas similares del ChromaDB
+    El LLM recibe:
+    - El plan completo del newsletter (content_plan) — las palabras exactas de Adam
+    - Los tweets de Adam del día — actualizaciones en tiempo real
+    - La metodología fija en el prompt
+    - La situación de mercado actual
+    - El análisis de Failed Breakdown
 
-    Returns:
-        Dict con entrar, razon, entrada, stop, targets, confianza
+    Esto es incomparablemente mejor que solo pasar listas de niveles.
     """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Formatear vela 15min
+    # Plan completo del newsletter — lo más importante
+    content_plan = (
+        today.get('content_plan') or
+        today.get('setup', '') + '\n' + today.get('invalida_si', '') or
+        'Plan no disponible — ejecuta newsletter_parser.py --force'
+    )
+
+    # Tweets del día formateados
+    tweets_texto = formatear_tweets_para_prompt(tweets or [])
+
+    # Descripción del Failed Breakdown
+    fb_descripcion = (fb_info or {}).get(
+        'descripcion',
+        '⚠️ Sin análisis de Failed Breakdown disponible'
+    )
+
+    # Vela 15min
     if bars_15:
         v = bars_15[-1]
         m = SPY_TO_ES_MULTIPLIER
-        open_15  = v['open']  * m
-        high_15  = v['high']  * m
-        low_15   = v['low']   * m
-        close_15 = v['close'] * m
-        confirmacion = "SÍ (vela en dirección)" if confirmar_con_vela_15min(bars_15, nivel, direccion) else "NO (vela contra dirección)"
+        open_15  = f"{v['open']  * m:.1f}"
+        high_15  = f"{v['high']  * m:.1f}"
+        low_15   = f"{v['low']   * m:.1f}"
+        close_15 = f"{v['close'] * m:.1f}"
+        confirmacion = ("SÍ — vela alcista confirma" if
+                        confirmar_con_vela_15min(bars_15, nivel, direccion)
+                        else "NO — vela no confirma dirección")
     else:
-        open_15 = high_15 = low_15 = close_15 = precio_es
-        confirmacion = "Sin datos de vela"
-
-    # Formatear contexto histórico
-    if historico:
-        historico_str = "\n".join([
-            f"- [{h['date']}] Bias:{h['bias']} | Setup: {h['setup'][:80]}"
-            for h in historico[:3]
-        ])
-    else:
-        historico_str = "No hay situaciones similares en el historial"
+        open_15 = high_15 = low_15 = close_15 = f"{precio_es:.1f}"
+        confirmacion = "Sin datos de vela 15min"
 
     prompt = SIGNAL_PROMPT.format(
-        precio_es      = f"{precio_es:.1f}",
-        nivel          = f"{nivel:.1f}",
-        direccion      = direccion.upper(),
-        bias           = today.get('bias', 'unknown'),
-        nivel_critico  = today.get('nivel_critico', 'N/A'),
-        soportes       = today.get('soportes', []),
-        resistencias   = today.get('resistencias', []),
-        setup          = (today.get('setup') or '')[:200],
-        invalida_si    = (today.get('invalida_si') or 'N/A')[:100],
-        open_15        = f"{open_15:.1f}",
-        high_15        = f"{high_15:.1f}",
-        low_15         = f"{low_15:.1f}",
-        close_15       = f"{close_15:.1f}",
-        confirmacion   = confirmacion,
-        historico      = historico_str,
+        content_plan  = content_plan,  # artículo completo — Haiku tiene 200K de contexto
+        tweets_hoy    = tweets_texto,
+        precio_es     = f"{precio_es:.1f}",
+        nivel         = f"{nivel:.1f}",
+        direccion     = direccion.upper(),
+        bias          = today.get('bias', 'unknown'),
+        fb_descripcion = fb_descripcion,
+        open_15       = open_15,
+        high_15       = high_15,
+        low_15        = low_15,
+        close_15      = close_15,
+        confirmacion  = confirmacion,
     )
 
     try:
         response = client.messages.create(
             model=LLM_MODEL,
-            max_tokens=400,
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = response.content[0].text.strip()
@@ -310,15 +463,11 @@ def generar_señal_llm(
 
 
 # ─────────────────────────────────────────────
-# Formato de alerta (placeholder Telegram)
+# Formato de alerta Telegram
 # ─────────────────────────────────────────────
 
 def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) -> str:
-    """
-    Formatea la señal como un mensaje de Telegram.
-    Mismo formato que usaremos en la Fase 6.
-    """
-    # Usar la dirección real guardada en la señal, no adivinarla del texto
+    """Formatea la señal como mensaje de Telegram."""
     es_long   = señal.get('direccion', 'long') == 'long'
     dir_emoji = '🟢' if es_long else '🔴'
     dir_texto = 'LONG' if es_long else 'SHORT'
@@ -329,14 +478,12 @@ def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) 
     t2      = señal.get('target2_es', '')
     conf    = señal.get('confianza', 0)
 
-    # Calcular ratio R/R si tenemos todos los datos
     rr_str = ''
     if entrada and stop and t1:
         riesgo  = abs(float(entrada) - float(stop))
         reward1 = abs(float(t1) - float(entrada))
         if riesgo > 0:
-            rr = reward1 / riesgo
-            rr_str = f"\n📐 R/R: 1:{rr:.1f}"
+            rr_str = f"\n📐 R/R: 1:{reward1/riesgo:.1f}"
 
     mensaje = (
         f"{dir_emoji} {dir_texto} ES — Señal Adam Mancini\n"
@@ -350,9 +497,8 @@ def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) 
 
     mensaje += (
         f"{'─' * 32}\n"
-        f"📊 Nivel clave: {nivel}\n"
-        f"🧠 Bias hoy: {today.get('bias', '?').upper()}\n"
-        f"💭 {señal.get('razon', '')[:120]}\n"
+        f"📊 Nivel: {nivel} | Bias: {today.get('bias', '?').upper()}\n"
+        f"💭 {señal.get('razon', '')[:200]}\n"
         f"🎯 Confianza: {conf:.0%}"
     )
     if rr_str:
@@ -362,6 +508,7 @@ def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) 
 
 
 async def enviar_alerta(mensaje: str):
+    """Envía la alerta por Telegram y la imprime en consola."""
     print(mensaje)
     try:
         alerter = TelegramAlerter()
@@ -370,30 +517,30 @@ async def enviar_alerta(mensaje: str):
         print(f"  ⚠️  Error Telegram: {e}")
 
 
-
 # ─────────────────────────────────────────────
 # Motor principal
 # ─────────────────────────────────────────────
 
 class SignalEngine:
     """
-    Motor de señales que combina todos los módulos del proyecto.
-    Corre en un loop continuo durante el horario de mercado.
+    Motor de señales que monitoriza el mercado y genera alertas.
+
+    Fuentes de información usadas (por orden de importancia):
+    1. Newsletter de hoy (content_plan) — las palabras exactas de Adam
+    2. Tweets de Adam del día — actualizaciones en tiempo real
+    3. Metodología fija en el prompt del LLM
+    4. Precio SPY/ES en tiempo real
+    5. Velas de 15min para detección de Failed Breakdown
     """
 
     def __init__(self):
-        self.feed       = SPYFeed()
-        self.collection = get_collection()
-        # Registro de últimas señales para evitar duplicados
-        # {nivel: datetime del último alerta}
+        self.feed = SPYFeed()
+        # Registro de señales enviadas para evitar duplicados (nivel → datetime)
         self._last_signal: dict = {}
 
     def _esta_en_cooldown(self, nivel: float, horas: float = 1.0) -> bool:
-        """
-        Evita señalar el mismo nivel más de una vez por hora.
-        Adam no repite entradas en el mismo nivel dentro de la misma sesión.
-        """
-        key = f"{nivel:.0f}"
+        """Evita señalar el mismo nivel más de una vez por hora."""
+        key  = f"{nivel:.0f}"
         last = self._last_signal.get(key)
         if last is None:
             return False
@@ -405,6 +552,16 @@ class SignalEngine:
     async def check_once(self) -> bool:
         """
         Ejecuta un ciclo completo de comprobación del mercado.
+
+        Flujo:
+        1. Precio actual (SPY → ES)
+        2. Plan de Adam del día (newsletter completo + niveles extraídos)
+        3. Tweets de Adam de hoy
+        4. Para cada nivel cercano al precio:
+           a. Detectar Failed Breakdown (elevator down + flush + recovery)
+           b. Si hay FB → preguntar al LLM con el newsletter completo + tweets
+           c. Si el LLM dice entrar → alerta Telegram
+
         Returns True si se generó alguna señal.
         """
         # ── 1. Precio actual ──────────────────────────────────────────────
@@ -416,7 +573,7 @@ class SignalEngine:
         precio_es  = snapshot['es_equivalent']
         ahora      = snapshot['timestamp'][:19]
 
-        # ── 2. Mapa del día ───────────────────────────────────────────────
+        # ── 2. Plan del día ───────────────────────────────────────────────
         today = load_today()
         if not today:
             return False
@@ -424,12 +581,25 @@ class SignalEngine:
         niveles = get_all_levels(today)
         bias    = today.get('bias', 'unknown')
 
-        print(f"[{ahora}] SPY:{precio_spy:.2f} ES:{precio_es:.1f} | "
-              f"Bias:{bias} | Niveles:{niveles[:4]}")
+        # Filtrar niveles cercanos al precio (±60 pts — rango relevante del día)
+        niveles_cercanos = [
+            n for n in niveles
+            if abs(n['nivel'] - precio_es) <= 60
+            and n['tipo'] != 'resistencia'  # Adam no va short
+        ]
 
-       # ── 3. Comprobar cada nivel (ahora son dicts con tipo) ────────────
-        señal_enviada = False  # inicializar ANTES del bucle para evitar UnboundLocalError
-        for nivel_info in niveles:
+        print(f"[{ahora}] SPY:{precio_spy:.2f} ES:{precio_es:.1f} | "
+              f"Bias:{bias} | Niveles cercanos:{len(niveles_cercanos)}")
+
+        # ── 3. Tweets de Adam de hoy ──────────────────────────────────────
+        tweets_hoy = get_todays_tweets()
+        if tweets_hoy:
+            print(f"  🐦 {len(tweets_hoy)} tweets de Adam hoy")
+
+        # ── 4. Comprobar cada nivel cercano ───────────────────────────────
+        señal_enviada = False
+
+        for nivel_info in niveles_cercanos:
             nivel = nivel_info['nivel']
 
             if not is_price_at_level(precio_es, nivel):
@@ -437,48 +607,49 @@ class SignalEngine:
             if self._esta_en_cooldown(nivel):
                 continue
 
-            # Dirección según tipo de nivel + bias (no solo posición del precio)
+            # Dirección (Adam no va short → solo long)
             direccion = determinar_lado(precio_es, nivel_info, bias)
             if not direccion:
                 continue
 
-            # Velas de 15 minutos para confirmación técnica
-            bars_15 = self.feed.get_bars(15, 5)
+            # Obtener velas de 15min (8 barras = 2 horas de contexto)
+            bars_15 = self.feed.get_bars(15, 8)
 
-            # Verificar confirmación técnica (no obligatoria, pero suma)
+            # Detectar Failed Breakdown — requisito fundamental de Adam
+            fb_info = detect_failed_breakdown(bars_15, nivel)
+            print(f"  {'✅ FB' if fb_info['es_fb'] else '⚠️  No FB'} | "
+                  f"{fb_info['descripcion'][:80]}")
+
+            # Confirmación de vela 15min
             confirmado = confirmar_con_vela_15min(bars_15, nivel, direccion)
             print(f"  📊 {direccion.upper()} | "
                   f"Vela 15min: {'✅ confirma' if confirmado else '⚠️ no confirma'}")
 
-            # Contexto histórico del ChromaDB
-            query_text = (
-                f"ES en {nivel:.0f}, precio {'en soporte' if direccion=='long' else 'en resistencia'}, "
-                f"bias {bias}"
-            )
-            historico = query_similar(self.collection, query_text, n_results=3)
-
-            # Consultar LLM
-            print("  🤖 Consultando LLM...")
+            # Consultar LLM con newsletter completo + tweets
+            print("  🤖 Consultando LLM (newsletter completo + tweets del día)...")
             señal = generar_señal_llm(
-                precio_es, nivel, direccion, today, bars_15, historico
+                precio_es  = precio_es,
+                nivel      = nivel,
+                direccion  = direccion,
+                today      = today,
+                bars_15    = bars_15,
+                fb_info    = fb_info,
+                tweets     = tweets_hoy,
             )
 
-            # Guardar la dirección real en la señal (no deducirla del texto LLM)
+            # Guardar la dirección real (no deducirla del texto)
             señal['direccion'] = direccion
-
 
             if señal.get('entrar'):
                 confianza = señal.get('confianza', 0)
                 print(f"  ✅ LLM: ENTRAR ({confianza:.0%} confianza)")
                 mensaje = formatear_alerta(señal, precio_es, nivel, today)
                 await enviar_alerta(mensaje)
-                self._marcar_señalado(nivel)  # cooldown largo: 1 hora
+                self._marcar_señalado(nivel)
                 señal_enviada = True
             else:
-                print(f"  ❌ LLM: No entrar — {señal.get('razon', '')[:80]}")
-                # Cooldown corto tras un "no": evita llamar al LLM cada 60s
-                # mientras el precio flota en el mismo nivel sin confirmación.
-                # Restamos 45 min → el cooldown efectivo es 15 min (= 1 vela de Adam)
+                print(f"  ❌ LLM: No entrar — {señal.get('razon', '')[:100]}")
+                # Cooldown corto tras un "no" (15 min efectivos)
                 self._last_signal[f"{nivel:.0f}"] = (
                     datetime.now() - timedelta(minutes=45)
                 )
@@ -486,10 +657,7 @@ class SignalEngine:
         return señal_enviada
 
     async def run_loop(self, interval_seconds: int = 60):
-        """
-        Loop principal: comprueba el mercado cada 'interval_seconds'.
-        Fuera de mercado espera eficientemente.
-        """
+        """Loop principal: comprueba el mercado cada 60 segundos."""
         print("=" * 55)
         print("  Bot Adam Mancini — Motor de Señales")
         print("=" * 55)
@@ -498,7 +666,7 @@ class SignalEngine:
 
         while True:
             if not is_market_open():
-                tz = pytz.timezone(MARKET_TIMEZONE)
+                tz    = pytz.timezone(MARKET_TIMEZONE)
                 ahora = datetime.now(tz).strftime('%H:%M')
                 print(f"[{ahora}] 😴 Mercado cerrado — esperando 5 min")
                 await asyncio.sleep(300)

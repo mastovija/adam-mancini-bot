@@ -31,7 +31,8 @@ from bs4 import BeautifulSoup
 # Añade la raíz del proyecto al path para importar config.py
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config import SUBSTACK_URL, NEWSLETTER_DIR
+
+from config import SUBSTACK_URL, NEWSLETTER_DIR, SUBSTACK_COOKIES
 
 
 # ─────────────────────────────────────────────
@@ -52,7 +53,27 @@ DELAY_BETWEEN_REQUESTS = 1.5  # segundos
 
 # Artículos por página en la API de Substack
 BATCH_SIZE = 12
+PREVIEW_MAX_LENGTH = 500  # articles shorter than this are considered previews
 
+def get_cookies_dict() -> dict:
+    """
+    Parses SUBSTACK_COOKIES from .env into a dict for requests.
+    With a valid substack.sid cookie, Substack serves the full
+    paid article instead of the public preview.
+    """
+    cookies = {}
+    if not SUBSTACK_COOKIES:
+        return cookies
+    for part in SUBSTACK_COOKIES.split(';'):
+        part = part.strip()
+        if '=' in part:
+            name, value = part.split('=', 1)
+            cookies[name.strip()] = value.strip()
+    return cookies
+
+def has_paid_access() -> bool:
+    """Returns True if paid cookies are configured in .env."""
+    return bool(get_cookies_dict())
 
 # ─────────────────────────────────────────────
 # Fase 1: Obtener listado de artículos
@@ -133,10 +154,12 @@ def scrape_post_content(post: dict) -> dict:
     Returns:
         dict con todos los metadatos + el campo 'content' con el texto
     """
+    cookies = get_cookies_dict()   # session cookie for paid content
     try:
         response = requests.get(
             post['url'],
             headers={**HEADERS, 'Accept': 'text/html'},
+            cookies=cookies,       # sends substack.sid → full content
             timeout=15
         )
         response.raise_for_status()
@@ -171,9 +194,10 @@ def scrape_post_content(post: dict) -> dict:
             content_text = element.get_text('\n', strip=True)
             break
 
-    # Determinar si tenemos el artículo completo o solo el preview
-    # Si tiene poco texto, probablemente es solo el preview del paywall
-    is_complete = len(content_text) > 400 and not has_paywall
+    # Previews: 900-2500 chars | Artículos completos: 5000-40000 chars
+    # No usamos has_paywall porque Substack muestra elementos de paywall
+    # incluso cuando el usuario está autenticado y tiene el contenido completo.
+    is_complete = len(content_text) > 3000
 
     return {
         **post,
@@ -234,8 +258,38 @@ def scrape_newsletter():
     existing_slugs = {f.stem for f in NEWSLETTER_DIR.glob('*.json')
                       if f.stem != 'index'}
 
-    to_download_free = [p for p in free_posts if p['slug'] not in existing_slugs]
-    to_download_paid = [p for p in paid_posts if p['slug'] not in existing_slugs]
+    def needs_download(post: dict) -> bool:
+        """
+        Re-downloads paid articles if they only have preview content.
+        Key: with cookies configured, replaces all short previews with
+        the full article text automatically.
+        """
+        if post['slug'] not in existing_slugs:
+            return True             # never downloaded → always download
+        if post['is_free']:
+            return False            # free articles are already complete
+        if not has_paid_access():
+            return False            # no cookies → can't improve the preview
+        # Paid article + cookies → re-download if the file is just a preview
+        f = NEWSLETTER_DIR / f"{post['slug']}.json"
+        try:
+            data = json.load(open(f, encoding='utf-8'))
+            return (not data.get('is_complete', False) or
+                    data.get('content_length', 0) < PREVIEW_MAX_LENGTH)
+        except Exception:
+            return True
+
+    to_download_free = [p for p in free_posts if needs_download(p)]
+    to_download_paid = [p for p in paid_posts if needs_download(p)]
+
+    if has_paid_access():
+        est_min = (len(to_download_paid) * DELAY_BETWEEN_REQUESTS) / 60
+        print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
+              f"{len(to_download_paid)} de pago (contenido completo con cookies)")
+        print(f"⏱️  Tiempo estimado: ~{est_min:.0f} minutos")
+    else:
+        print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
+              f"{len(to_download_paid)} de pago (solo metadatos/preview)")
 
     print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
           f"{len(to_download_paid)} de pago (solo metadatos)")

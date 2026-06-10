@@ -8,6 +8,12 @@ y guarda el resultado en data/daily/today.json.
 Este archivo es lo que el motor de señales (Fase 5) consulta durante
 toda la sesión para saber el bias, los niveles clave y las condiciones.
 
+CAMPOS CLAVE en today.json:
+  - soportes, resistencias, nivel_critico, bias: extraídos por Haiku
+  - content_plan: últimos 8000 chars del artículo = sección Trade Plan
+    (contiene "I'd bid direct", "Bull/Bear case", contexto de niveles)
+    Este es el campo más importante — el motor de señales lo pasa completo al LLM.
+
 USO manual:
     python parsers/newsletter_parser.py
 
@@ -26,16 +32,36 @@ from bs4 import BeautifulSoup
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config import SUBSTACK_URL, DATA_DIR
+from config import SUBSTACK_URL, DATA_DIR, SUBSTACK_COOKIES
 from knowledge_base.processor import extract_trading_info
 
 
 # ─────────────────────────────────────────────
 # Rutas de archivos
 # ─────────────────────────────────────────────
-DAILY_DIR    = DATA_DIR / 'daily'
-TODAY_FILE   = DAILY_DIR / 'today.json'      # sobreescrito cada día
-HISTORY_DIR  = DAILY_DIR / 'history'         # copia de cada día guardada
+DAILY_DIR   = DATA_DIR / 'daily'
+TODAY_FILE  = DAILY_DIR / 'today.json'
+HISTORY_DIR = DAILY_DIR / 'history'
+
+
+# ─────────────────────────────────────────────
+# Cookies de suscripción de pago
+# ─────────────────────────────────────────────
+
+def get_substack_cookies() -> dict:
+    """
+    Parsea SUBSTACK_COOKIES del .env a un dict para requests.
+    Con substack.sid, Substack sirve el artículo completo (30,000+ chars).
+    """
+    cookies = {}
+    if not SUBSTACK_COOKIES:
+        return cookies
+    for part in SUBSTACK_COOKIES.split(';'):
+        part = part.strip()
+        if '=' in part:
+            name, value = part.split('=', 1)
+            cookies[name.strip()] = value.strip()
+    return cookies
 
 
 # ─────────────────────────────────────────────
@@ -43,17 +69,10 @@ HISTORY_DIR  = DAILY_DIR / 'history'         # copia de cada día guardada
 # ─────────────────────────────────────────────
 
 def get_latest_article() -> dict | None:
-    """
-    Consulta la API pública de Substack para obtener el artículo más reciente.
-    No requiere suscripción — devuelve metadatos de todos los artículos.
-
-    Returns:
-        dict con slug, title, url, published_at, is_free
-        o None si hay error de conexión
-    """
+    """Consulta la API pública de Substack para el artículo más reciente."""
     try:
         url = f"{SUBSTACK_URL}/api/v1/archive?sort=new&offset=0&limit=1"
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        r   = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         r.raise_for_status()
         articles = r.json()
 
@@ -66,7 +85,7 @@ def get_latest_article() -> dict | None:
             'title':        a.get('title', ''),
             'subtitle':     a.get('subtitle', ''),
             'url':          f"{SUBSTACK_URL}/p/{a.get('slug', '')}",
-            'published_at': a.get('post_date', '')[:10],  # solo fecha YYYY-MM-DD
+            'published_at': a.get('post_date', '')[:10],
             'is_free':      a.get('audience') == 'everyone',
         }
     except Exception as e:
@@ -76,16 +95,16 @@ def get_latest_article() -> dict | None:
 
 def scrape_article_content(url: str) -> str:
     """
-    Descarga el contenido visible del artículo.
-    Para artículos gratuitos obtiene el texto completo.
-    Para artículos de pago obtiene solo el preview visible.
-
-    Args:
-        url: URL del artículo en Substack
-
-    Returns:
-        Texto del artículo (lo que sea visible sin suscripción)
+    Descarga el contenido completo del artículo usando las cookies de suscripción.
+    Sin cookies solo obtiene el preview (2,000-3,000 chars).
     """
+    cookies = get_substack_cookies()
+
+    if cookies:
+        print("   🔑 Usando cookies de suscripción (contenido completo)")
+    else:
+        print("   🆓 Sin cookies — solo preview público")
+
     try:
         r = requests.get(
             url,
@@ -95,12 +114,12 @@ def scrape_article_content(url: str) -> str:
                     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0'
                 )
             },
+            cookies=cookies,
             timeout=15
         )
         r.raise_for_status()
         soup = BeautifulSoup(r.text, 'html.parser')
 
-        # Substack ha cambiado su estructura varias veces — probamos selectores
         for selector in ['div.available-content', 'div.body.markup', 'article']:
             el = soup.select_one(selector)
             if el:
@@ -121,46 +140,45 @@ def scrape_article_content(url: str) -> str:
 def guardar_mapa_dia(article: dict, trading_info: dict, content: str) -> dict:
     """
     Construye y guarda el mapa del día en dos sitios:
-    - data/daily/today.json  → se sobreescribe cada día (el motor lo lee aquí)
-    - data/daily/history/YYYY-MM-DD.json  → archivo histórico permanente
+    - data/daily/today.json              → sobreescrito cada día (motor lo lee aquí)
+    - data/daily/history/YYYY-MM-DD.json → copia histórica permanente
 
-    Args:
-        article:       metadatos del artículo (de get_latest_article)
-        trading_info:  info extraída por LLM (bias, niveles, setup)
-        content:       texto del artículo para referencia
+    El campo más importante es 'content_plan': los últimos 8000 chars del
+    artículo, que corresponden a la sección "Trade Plan" donde Adam escribe:
+    - "In terms of lvls I'd bid direct:" (los niveles realmente accionables)
+    - "Bull case tomorrow:" / "Bear case tomorrow:"
+    - Contexto específico de cada nivel ("tested to death", "obvious FB", etc.)
 
-    Returns:
-        dict con toda la información del día
+    El motor de señales pasa este texto completo al LLM para que tome
+    decisiones con las palabras exactas de Adam, no solo con listas de números.
     """
     DAILY_DIR.mkdir(parents=True, exist_ok=True)
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
     mapa = {
-        # Metadatos del artículo
-        'date':            article.get('published_at', str(date.today())),
-        'title':           article.get('title', ''),
-        'url':             article.get('url', ''),
-        'is_complete':     article.get('is_free', False),
-        'parsed_at':       datetime.now().isoformat(),
+        'date':           article.get('published_at', str(date.today())),
+        'title':          article.get('title', ''),
+        'url':            article.get('url', ''),
+        'is_complete':    len(content) > 5000,
+        'parsed_at':      datetime.now().isoformat(),
 
-        # Mapa de trading extraído por LLM
-        'bias':            trading_info.get('bias', 'unknown'),
-        'condicion_bias':  trading_info.get('condicion_bias'),
-        'nivel_critico':   trading_info.get('nivel_critico'),
-        'soportes':        trading_info.get('soportes', []),
-        'resistencias':    trading_info.get('resistencias', []),
-        'setup':           trading_info.get('setup'),
-        'invalida_si':     trading_info.get('invalida_si'),
+        # Campos extraídos por Haiku (niveles estructurados)
+        'bias':           trading_info.get('bias', 'unknown'),
+        'condicion_bias': trading_info.get('condicion_bias'),
+        'nivel_critico':  trading_info.get('nivel_critico'),
+        'soportes':       trading_info.get('soportes', []),
+        'resistencias':   trading_info.get('resistencias', []),
+        'setup':          trading_info.get('setup'),
+        'invalida_si':    trading_info.get('invalida_si'),
 
-        # Preview del contenido para debug
-        'content_preview': content[:1500] if content else '',
+        # Artículo completo — el LLM lo lee entero para entender el plan de Adam
+        # Coste: ~$0.007 por llamada al LLM, solo cuando el precio toca un nivel
+        'content_plan':   content,
     }
 
-    # Guardar today.json (el motor de señales siempre lee este archivo)
     with open(TODAY_FILE, 'w', encoding='utf-8') as f:
         json.dump(mapa, f, indent=2, ensure_ascii=False)
 
-    # Guardar copia histórica con la fecha como nombre
     history_file = HISTORY_DIR / f"{mapa['date']}.json"
     with open(history_file, 'w', encoding='utf-8') as f:
         json.dump(mapa, f, indent=2, ensure_ascii=False)
@@ -179,15 +197,9 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
     Flujo:
     1. Comprueba si ya tenemos el mapa de hoy (evita reprocesar)
     2. Obtiene el artículo más reciente de Substack
-    3. Descarga el contenido (preview o completo si es gratuito)
-    4. Extrae bias, niveles y setup con Claude Haiku
-    5. Guarda en data/daily/today.json
-
-    Args:
-        force: si True, reparsea aunque ya exista el de hoy
-
-    Returns:
-        dict con el mapa del día, o None si no hay newsletter disponible
+    3. Descarga el contenido completo (con cookies de suscripción)
+    4. Extrae bias y niveles con Claude Haiku
+    5. Guarda en data/daily/today.json con content_plan completo
     """
     print("=" * 55)
     print("  Bot Adam Mancini — Newsletter Parser")
@@ -195,7 +207,6 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
 
     hoy = str(date.today())
 
-    # ── Comprobar si ya tenemos el de hoy ────────────────────────────────
     if TODAY_FILE.exists() and not force:
         with open(TODAY_FILE) as f:
             existing = json.load(f)
@@ -204,7 +215,6 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
             _mostrar_resumen(existing)
             return existing
 
-    # ── Obtener metadatos del artículo más reciente ───────────────────────
     print(f"🔍 Consultando Substack para {hoy}...")
     article = get_latest_article()
 
@@ -214,18 +224,15 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
 
     print(f"📰 Artículo: [{article['published_at']}] {article['title'][:60]}")
 
-    # ── Descargar contenido del artículo ─────────────────────────────────
     print("📥 Descargando contenido...")
     content = scrape_article_content(article['url'])
 
     if content:
         print(f"   ✅ {len(content):,} caracteres obtenidos")
-        article['is_free'] = len(content) > 500  # actualizar si es completo
     else:
-        print("   ⚠️  Sin contenido (artículo de pago) — usando título")
+        print("   ⚠️  Sin contenido — usando título")
         content = f"{article['title']}\n{article.get('subtitle', '')}"
 
-    # ── Extraer mapa de trading con LLM ──────────────────────────────────
     print("🤖 Extrayendo mapa del día con Claude Haiku...")
 
     try:
@@ -234,24 +241,20 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
             'published_at': article['published_at'],
             'content':      content,
         })
+        soportes     = trading_info.get('soportes', [])
+        resistencias = trading_info.get('resistencias', [])
         print(f"   ✅ Bias: {trading_info.get('bias')} | "
               f"Crítico: {trading_info.get('nivel_critico')} | "
-              f"Soportes: {trading_info.get('soportes', [])}")
+              f"Soportes: {len(soportes)} | "
+              f"Resistencias: {len(resistencias)}")
     except Exception as e:
         print(f"   ❌ Error LLM: {e}")
         trading_info = {}
 
-    # ── Guardar mapa del día ──────────────────────────────────────────────
     mapa = guardar_mapa_dia(article, trading_info, content)
     print(f"\n💾 Guardado en: {TODAY_FILE}")
-
-    # ── Mostrar resumen legible ───────────────────────────────────────────
+    print(f"   content_plan: {len(mapa.get('content_plan', ''))} chars (Trade Plan completo)")
     _mostrar_resumen(mapa)
-
-    if not article.get('is_free'):
-        print("\n💡 Solo hay preview disponible.")
-        print("   Al suscribirte el análisis será mucho más detallado.")
-
     return mapa
 
 
@@ -261,21 +264,29 @@ def _mostrar_resumen(mapa: dict):
     print("┌─ MAPA DEL DÍA " + "─" * 38)
     print(f"│ Fecha:         {mapa.get('date', '?')}")
     print(f"│ Bias:          {mapa.get('bias', '?').upper()}")
+    print(f"│ Completo:      {'✅ Sí' if mapa.get('is_complete') else '⚠️  Solo preview'}")
+    print(f"│ Plan completo: {'✅ Sí' if mapa.get('content_plan') else '❌ No'} "
+          f"({len(mapa.get('content_plan', ''))} chars)")
 
     if mapa.get('nivel_critico'):
         print(f"│ Nivel crítico: {mapa['nivel_critico']}")
 
     if mapa.get('soportes'):
-        print(f"│ Soportes:      {mapa['soportes']}")
+        print(f"│ Soportes ({len(mapa['soportes'])}):  {mapa['soportes']}")
 
     if mapa.get('resistencias'):
-        print(f"│ Resistencias:  {mapa['resistencias']}")
+        print(f"│ Resists ({len(mapa['resistencias'])}):   {mapa['resistencias'][:8]}...")
 
     if mapa.get('setup'):
-        print(f"│ Setup:         {mapa['setup'][:80]}")
+        texto = mapa['setup']
+        print(f"│ Setup:")
+        for linea in texto.split('.'):
+            linea = linea.strip()
+            if linea:
+                print(f"│   {linea}.")
 
     if mapa.get('invalida_si'):
-        print(f"│ Invalida si:   {mapa['invalida_si'][:80]}")
+        print(f"│ Invalida si:   {mapa['invalida_si']}")
 
     print("└" + "─" * 53)
     print()

@@ -4,7 +4,14 @@ knowledge_base/processor.py — Extrae información de trading con Claude Haiku
 Lee un artículo del newsletter y usa el LLM para extraer los datos
 estructurados que necesitamos: bias, niveles, setup del día.
 
-No llames esto directamente — lo usa build_kb.py
+ESTRATEGIA DE EXTRACCIÓN:
+- Primeros 2000 chars → bias, contexto y análisis narrativo
+- Últimos 6000 chars  → sección Trade Plan con las listas de niveles
+  (Adam siempre escribe "Supports are: X, Y, Z" y "Resistances are: X, Y, Z"
+  al final del artículo. Con el límite antiguo de 1500 chars nunca llegábamos
+  a esta sección y extraíamos 0-3 niveles en vez de los 20-50 reales.)
+
+No llames esto directamente — lo usa build_kb.py y newsletter_parser.py
 """
 
 import json
@@ -21,28 +28,32 @@ from config import ANTHROPIC_API_KEY, LLM_MODEL
 # ─────────────────────────────────────────────
 # Prompt de extracción
 # ─────────────────────────────────────────────
-# Diseñado para ser conciso (menos tokens = más barato)
-# y devolver JSON limpio sin markdown
 
-EXTRACTION_PROMPT = """Analiza este fragmento de newsletter de trading del S&P 500/ES y extrae los datos clave.
+EXTRACTION_PROMPT = """Analiza este newsletter de trading del S&P 500/ES futures.
 
 Título: {title}
 Fecha: {date}
-Contenido:
-{content}
+
+INICIO DEL ARTÍCULO (análisis y contexto):
+{content_start}
+
+SECCIÓN TRADE PLAN (niveles del día):
+{content_end}
 
 Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown:
 {{
   "bias": "bullish" | "bearish" | "neutral" | "mixed",
   "condicion_bias": "una frase corta con la condición principal",
-  "soportes": [lista de niveles numéricos de soporte mencionados],
-  "resistencias": [lista de niveles numéricos de resistencia mencionados],
-  "nivel_critico": número más importante del día o null,
+  "soportes": [TODOS los niveles numéricos de soporte que aparezcan en 'Supports are:'],
+  "resistencias": [TODOS los niveles numéricos de resistencia que aparezcan en 'Resistances are:'],
+  "nivel_critico": el nivel más importante del día o null,
   "setup": "descripción del setup principal en máximo 2 frases",
   "invalida_si": "qué condición invalidaría la tesis o null"
 }}
 
-Si un campo no se menciona: null para valores, [] para listas."""
+Extrae TODOS los niveles de las listas 'Supports are:' y 'Resistances are:', no solo los (major).
+Si no hay listas explícitas, extrae los niveles mencionados en el texto narrativo.
+Si un campo no aparece: null para valores simples, [] para listas."""
 
 
 # ─────────────────────────────────────────────
@@ -53,29 +64,42 @@ def extract_trading_info(article: dict) -> dict:
     """
     Usa Claude Haiku para extraer información estructurada de un artículo.
 
+    Envía dos secciones del artículo al LLM:
+    - content_start: primeros 2000 chars para bias y contexto narrativo
+    - content_end:   últimos 6000 chars para los niveles del Trade Plan
+
+    Esto resuelve el problema anterior donde el límite de 1500 chars
+    cortaba el artículo antes de llegar a la sección 'Supports are:'
+    y 'Resistances are:', que Adam siempre coloca al final.
+
     Args:
         article: dict con 'title', 'published_at', 'content'
 
     Returns:
-        dict con bias, soportes, resistencias, setup, etc.
+        dict con bias, soportes, resistencias, nivel_critico, setup, invalida_si
         En caso de error devuelve un dict vacío con valores por defecto.
     """
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    content = article.get('content', '')
 
-    # Limitar el contenido a 1500 chars para reducir coste
-    # Los datos clave de Adam siempre están en los primeros párrafos
-    content_truncated = article.get('content', '')[:1500]
+    # Primeros 2000 chars: contienen el análisis narrativo y el bias del día
+    content_start = content[:2000]
+
+    # Últimos 6000 chars: contienen el Trade Plan con las listas de niveles.
+    # Si el artículo es corto (preview) el contenido_end será vacío o idéntico al start.
+    content_end = content[-6000:] if len(content) > 6000 else ''
 
     prompt = EXTRACTION_PROMPT.format(
         title=article.get('title', ''),
         date=article.get('published_at', ''),
-        content=content_truncated
+        content_start=content_start,
+        content_end=content_end
     )
 
     try:
         response = client.messages.create(
             model=LLM_MODEL,
-            max_tokens=400,
+            max_tokens=1000,  # aumentado: necesitamos espacio para 20-50 niveles en el JSON
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -97,11 +121,11 @@ def extract_trading_info(article: dict) -> dict:
 def _empty_trading_info() -> dict:
     """Valores por defecto cuando la extracción falla."""
     return {
-        "bias": "unknown",
+        "bias":           "unknown",
         "condicion_bias": None,
-        "soportes": [],
-        "resistencias": [],
-        "nivel_critico": None,
-        "setup": None,
-        "invalida_si": None,
+        "soportes":       [],
+        "resistencias":   [],
+        "nivel_critico":  None,
+        "setup":          None,
+        "invalida_si":    None,
     }
