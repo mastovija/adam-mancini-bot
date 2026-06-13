@@ -11,14 +11,18 @@ FUENTES DE INFORMACIÓN (por orden de importancia):
   4. Precio SPY/ES en tiempo real — para detectar cuándo se acerca a un nivel
   5. Velas de 15min — confirmación técnica y detección de Failed Breakdown
 
-LÓGICA DE ENTRADA:
-  - Detecta when el precio está cerca de un nivel del newsletter
-  - Analiza si hay un Failed Breakdown real (flush + recovery, no chop)
-  - Pasa el plan completo de Adam + sus tweets del día al LLM
-  - El LLM (con las palabras exactas de Adam) decide si es una entrada válida
+VENTANA DE TRADING DE ADAM:
+  - 7:30-11:00 AM EST: ventana principal, mayoría de entradas
+  - 11:00-14:00 EST: chop, raramente opera
+  - 14:00-16:00 EST: segunda ventana
 
-USO:
-    python signals/signal_engine.py
+LÓGICA DE ENTRADA:
+  - Detecta cuando el precio está cerca de un nivel del newsletter
+    (tanto soportes COMO resistencias — estas pueden actuar como soportes
+    cuando el precio hace backtest desde arriba)
+  - Analiza si hay un Failed Breakdown real (flush + recovery, no chop)
+  - Pasa el plan completo de Adam + tweets + hora del día al LLM
+  - El LLM (con las palabras exactas de Adam) decide si es una entrada válida
 """
 
 import asyncio
@@ -78,7 +82,6 @@ def load_today() -> dict | None:
         if dias > 2:
             print(f"  ⚠️  today.json tiene {dias} días de antigüedad")
 
-    # Verificar que tenemos el plan completo
     content_len = len(data.get('content_plan', ''))
     if content_len < 500:
         print(f"  ⚠️  content_plan muy corto ({content_len} chars) — "
@@ -90,7 +93,13 @@ def load_today() -> dict | None:
 def get_all_levels(today: dict) -> list:
     """
     Extrae los niveles del mapa del día conservando su tipo.
-    Devuelve lista de dicts: {{'nivel': float, 'tipo': 'soporte'|'resistencia'|'pivote'}}
+    Incluye soportes, resistencias Y pivote.
+
+    Las resistencias también se incluyen porque pueden actuar como soporte
+    cuando el precio hace backtest desde arriba (setup explícito de Adam).
+    El LLM con el newsletter completo decide si son accionables.
+
+    Returns: [{'nivel': float, 'tipo': 'soporte'|'resistencia'|'pivote'}, ...]
     """
     niveles = []
 
@@ -111,14 +120,46 @@ def get_all_levels(today: dict) -> list:
 
 
 # ─────────────────────────────────────────────
+# Ventana de trading de Adam
+# ─────────────────────────────────────────────
+
+def get_trading_window() -> tuple:
+    """
+    Determina en qué ventana de trading de Adam estamos.
+
+    Adam opera principalmente en dos ventanas:
+    - 7:30-11:00 AM EST: ventana principal, mayoría de entradas
+    - 11:00-14:00 EST: chop, raramente opera ("I rarely trade this window")
+    - 14:00-16:00 EST: segunda ventana, solo si el primer trade fue ganador
+
+    Returns: (hora_str, descripcion_ventana)
+    """
+    tz_est   = pytz.timezone(MARKET_TIMEZONE)
+    ahora    = datetime.now(tz_est)
+    hora_str = ahora.strftime('%H:%M EST')
+    hora_dec = ahora.hour + ahora.minute / 60.0
+
+    if 7.5 <= hora_dec < 11.0:
+        ventana = "🟢 VENTANA PRINCIPAL (7:30-11:00 AM) — óptima, mayoría de entradas de Adam"
+    elif 11.0 <= hora_dec < 14.0:
+        ventana = ("🔴 VENTANA CHOP (11:00 AM-2:00 PM) — Adam raramente opera aquí. "
+                   "Solo entrar en A+ setups con FB muy claro.")
+    elif 14.0 <= hora_dec < 16.0:
+        ventana = ("🟡 VENTANA TARDE (2:00-4:00 PM) — segunda ventana de Adam. "
+                   "Solo si el primer trade del día fue ganador.")
+    else:
+        ventana = "⚪ FUERA DE VENTANA DE TRADING"
+
+    return hora_str, ventana
+
+
+# ─────────────────────────────────────────────
 # Tweets del día
 # ─────────────────────────────────────────────
 
 def get_todays_tweets() -> list:
     """
     Lee los tweets de Adam del día actual desde el estado del tweet monitor.
-    El tweet_monitor.py los guarda en tweet_monitor_state.json.
-    Returns: lista de dicts con 'text', 'created_at', etc.
     """
     if not TWEETS_FILE.exists():
         return []
@@ -127,7 +168,6 @@ def get_todays_tweets() -> list:
         state = json.load(open(TWEETS_FILE, encoding='utf-8'))
         hoy   = datetime.now().strftime('%Y-%m-%d')
 
-        # Solo tweets del día de hoy
         if state.get('fecha_hoy') != hoy:
             return []
 
@@ -135,7 +175,6 @@ def get_todays_tweets() -> list:
         tweets = []
         for item in tweets_hoy:
             if isinstance(item, dict):
-                # El estado guarda {'tweet': {...}, 'clasificacion': {...}}
                 tweet = item.get('tweet', item)
                 if tweet.get('text') and not tweet.get('is_retweet'):
                     tweets.append(tweet)
@@ -145,10 +184,7 @@ def get_todays_tweets() -> list:
 
 
 def formatear_tweets_para_prompt(tweets: list) -> str:
-    """
-    Formatea los tweets de Adam del día para el prompt del LLM.
-    Incluye los últimos 12 tweets con texto y hora.
-    """
+    """Formatea los tweets de Adam del día para el prompt del LLM."""
     if not tweets:
         return "No hay tweets de Adam todavía hoy."
 
@@ -185,7 +221,17 @@ def is_price_at_level(precio_es: float, nivel: float, tolerancia: float = None) 
 def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None:
     """
     Decide la dirección del trade según el tipo de nivel y el bias.
-    Adam no va short → resistencias devuelven None.
+
+    Soportes → long (soporte directo)
+    Resistencias → long (backtest desde arriba, puede actuar como soporte)
+      Adam describe este setup: precio rompe una zona, sube, vuelve a testear
+      la zona desde arriba como soporte (su "Level Reclaim" o "Backtest entry")
+    Pivote → según posición del precio
+
+    El LLM con el newsletter completo decide si la resistencia es accionable
+    como soporte para ese día concreto.
+
+    Adam no va short → nunca devolvemos 'short'.
     """
     tipo = nivel_info['tipo']
 
@@ -193,8 +239,9 @@ def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None
         return 'long' if bias != 'bearish' else None
 
     if tipo == 'resistencia':
-        # Adam no va short en ES — las resistencias son para contexto
-        return None
+        # La resistencia puede ser entrada long cuando el precio la retesta desde arriba
+        # (backtest/level reclaim setup de Adam). El LLM decide si aplica hoy.
+        return 'long' if bias != 'bearish' else None
 
     if tipo == 'pivote':
         nivel = nivel_info['nivel']
@@ -207,10 +254,7 @@ def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None
 
 
 def confirmar_con_vela_15min(bars_15: list, nivel: float, direccion: str) -> bool:
-    """
-    Confirma el setup usando la vela de 15 minutos (timeframe principal de Adam).
-    LONG: último cierre > apertura (vela verde) Y precio por encima del nivel.
-    """
+    """Confirma el setup usando la vela de 15 minutos (timeframe principal de Adam)."""
     if not bars_15:
         return False
 
@@ -233,10 +277,7 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
     2. Flush por DEBAJO del nivel (al menos 5 pts)
     3. Precio actual recuperado ENCIMA del nivel
 
-    Sin este patrón Adam NO entra aunque el precio esté "en un nivel".
-
-    Returns:
-        dict con 'es_fb', 'flush_size', 'bars_ago', 'descripcion'
+    Returns: dict con 'es_fb', 'flush_size', 'bars_ago', 'descripcion'
     """
     if not bars_15 or len(bars_15) < 2:
         return {
@@ -247,7 +288,6 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
     m                = SPY_TO_ES_MULTIPLIER
     precio_actual_es = bars_15[-1]['close'] * m
 
-    # Recovery: precio actual encima del nivel
     if precio_actual_es <= nivel:
         return {
             'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
@@ -257,7 +297,6 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
             )
         }
 
-    # Buscar secuencia above → flush en las últimas 8 barras (oldest → newest)
     was_above = False
 
     for i in range(1, min(9, len(bars_15))):
@@ -286,7 +325,7 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
                 'bars_ago':    i,
                 'descripcion': (
                     f'✅ FAILED BREAKDOWN: {calidad}, hace {i} velas ({i*15} min), '
-                    f'precio actual {precio_actual_es:.0f} recuperado encima de {nivel:.0f}'
+                    f'precio {precio_actual_es:.0f} recuperado encima de {nivel:.0f}'
                 )
             }
 
@@ -296,7 +335,7 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
         'bars_ago':    0,
         'descripcion': (
             f'⚠️ Sin Failed Breakdown: precio {precio_actual_es:.0f} encima de '
-            f'{nivel:.0f} pero sin secuencia elevator down → flush → recovery visible. '
+            f'{nivel:.0f} pero sin secuencia elevator down → flush → recovery. '
             f'Adam NO entraría aquí.'
         )
     }
@@ -320,13 +359,20 @@ Tu ÚNICO setup de entrada es el Failed Breakdown:
 
 Mínimo significativo válido: low del día anterior, low multi-hora (20+ pts), shelf de lows
 
+Tienes también el Level Reclaim / Backtest setup:
+  Cuando una resistencia importante se rompe al alza, el precio vuelve a retestearla
+  desde arriba y ese nivel actúa como soporte → entrada long en el backtest.
+
+VENTANA DE TRADING (crítico para evaluar la entrada):
+  - 7:30-11:00 AM EST: ventana PRINCIPAL, la mayoría de tus entradas
+  - 11:00 AM-2:00 PM EST: CHOP, raramente operas aquí ("I rarely trade this window")
+  - 2:00-4:00 PM EST: segunda ventana, solo si el primer trade del día fue ganador
+
 NUNCA:
   - Knife catch (comprar en caída libre — esperar flush completo + recovery)
-  - Comprar un nivel "porque está ahí" sin ver el elevator down + flush
+  - Comprar niveles "tested to death" sin ver el trap y recovery fresco
   - Ir short en ES (solo longs vía Failed Breakdowns)
-  - Comprar niveles "tested to death" sin ver el trap y recovery
-
-Gestión: 75% beneficios en primer nivel, dejar runner libre de riesgo, stop bajo el flush mínimo
+  - Operar el chop de 11am-2pm salvo setup A+ muy claro
 
 ══════════════════════════════════════════════════════════
 TU PLAN PARA HOY (newsletter completo — tus propias palabras):
@@ -341,10 +387,11 @@ TUS TWEETS DE HOY (actualizaciones en tiempo real):
 ══════════════════════════════════════════════════════════
 SITUACIÓN ACTUAL DE MERCADO:
 ══════════════════════════════════════════════════════════
-Precio ES actual:  {precio_es}
-Nivel bajo análisis: {nivel}
-Dirección propuesta: {direccion}
-Bias del día:      {bias}
+Hora EST actual:     {hora_est}
+Ventana de trading:  {ventana}
+Precio ES actual:    {precio_es}
+Nivel bajo análisis: {nivel} ({tipo_nivel})
+Bias del día:        {bias}
 
 ANÁLISIS DE FAILED BREAKDOWN EN ESTE NIVEL:
 {fb_descripcion}
@@ -358,18 +405,19 @@ EVALUACIÓN:
 ══════════════════════════════════════════════════════════
 Basándote en TU newsletter de hoy y TU metodología, evalúa:
 
-1. ¿Este nivel ({nivel}) aparece en tu sección "I'd bid direct" o es un nivel accionable según tu plan?
+1. ¿Este nivel ({nivel}) aparece en tu sección "I'd bid direct" o es accionable según tu plan?
 2. ¿Hay un Failed Breakdown real aquí? (elevator down visible + flush + recovery + aceptación)
-3. ¿Las condiciones del día (bias, contexto de 7390, etc.) apoyan esta entrada?
+   O es un Level Reclaim/Backtest setup (resistencia que se convierte en soporte)?
+3. ¿La ventana horaria actual ({hora_est}) apoya esta entrada según tu metodología?
 4. ¿Qué dicen tus tweets de hoy sobre este nivel o situación?
 
-Si el nivel NO está en tu plan accionable, o NO hay FB real → entrar: false.
-Si el nivel está en tu plan Y hay FB real Y el contexto apoya → entrar: true.
+Si estamos en ventana chop (11am-2pm) → ser muy estricto, solo A+ obvios.
+Si el nivel NO está en tu plan, o NO hay FB/Backtest real → entrar: false.
 
 Responde SOLO con JSON válido, sin texto adicional:
 {{
   "entrar": true o false,
-  "razon": "cita tu newsletter o tweets y explica si hay FB real y por qué entra o no",
+  "razon": "cita tu newsletter o tweets, menciona la ventana horaria y explica si hay FB/Backtest real",
   "entrada_es": precio ES de entrada (número),
   "stop_es": stop ES (bajo el flush mínimo, máx 15 pts de riesgo),
   "target1_es": primer target (siguiente nivel de tu newsletter),
@@ -381,6 +429,7 @@ Responde SOLO con JSON válido, sin texto adicional:
 def generar_señal_llm(
     precio_es: float,
     nivel: float,
+    tipo_nivel: str,
     direccion: str,
     today: dict,
     bars_15: list,
@@ -391,33 +440,25 @@ def generar_señal_llm(
     Pregunta al LLM si Adam entraría en esta situación.
 
     El LLM recibe:
-    - El plan completo del newsletter (content_plan) — las palabras exactas de Adam
-    - Los tweets de Adam del día — actualizaciones en tiempo real
-    - La metodología fija en el prompt
+    - El plan completo del newsletter (content_plan)
+    - Los tweets de Adam del día
+    - La metodología fija (incluyendo ventanas horarias)
+    - La hora actual EST y la ventana de trading
     - La situación de mercado actual
     - El análisis de Failed Breakdown
-
-    Esto es incomparablemente mejor que solo pasar listas de niveles.
     """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Plan completo del newsletter — lo más importante
     content_plan = (
         today.get('content_plan') or
         today.get('setup', '') + '\n' + today.get('invalida_si', '') or
         'Plan no disponible — ejecuta newsletter_parser.py --force'
     )
 
-    # Tweets del día formateados
-    tweets_texto = formatear_tweets_para_prompt(tweets or [])
+    tweets_texto    = formatear_tweets_para_prompt(tweets or [])
+    fb_descripcion  = (fb_info or {}).get('descripcion', '⚠️ Sin análisis de FB disponible')
+    hora_est, ventana = get_trading_window()
 
-    # Descripción del Failed Breakdown
-    fb_descripcion = (fb_info or {}).get(
-        'descripcion',
-        '⚠️ Sin análisis de Failed Breakdown disponible'
-    )
-
-    # Vela 15min
     if bars_15:
         v = bars_15[-1]
         m = SPY_TO_ES_MULTIPLIER
@@ -433,10 +474,13 @@ def generar_señal_llm(
         confirmacion = "Sin datos de vela 15min"
 
     prompt = SIGNAL_PROMPT.format(
-        content_plan  = content_plan,  # artículo completo — Haiku tiene 200K de contexto
+        content_plan  = content_plan,
         tweets_hoy    = tweets_texto,
+        hora_est      = hora_est,
+        ventana       = ventana,
         precio_es     = f"{precio_es:.1f}",
         nivel         = f"{nivel:.1f}",
+        tipo_nivel    = tipo_nivel,
         direccion     = direccion.upper(),
         bias          = today.get('bias', 'unknown'),
         fb_descripcion = fb_descripcion,
@@ -466,7 +510,8 @@ def generar_señal_llm(
 # Formato de alerta Telegram
 # ─────────────────────────────────────────────
 
-def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) -> str:
+def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict,
+                     hora_est: str = '') -> str:
     """Formatea la señal como mensaje de Telegram."""
     es_long   = señal.get('direccion', 'long') == 'long'
     dir_emoji = '🟢' if es_long else '🔴'
@@ -498,6 +543,11 @@ def formatear_alerta(señal: dict, precio_es: float, nivel: float, today: dict) 
     mensaje += (
         f"{'─' * 32}\n"
         f"📊 Nivel: {nivel} | Bias: {today.get('bias', '?').upper()}\n"
+    )
+    if hora_est:
+        mensaje += f"⏰ {hora_est}\n"
+
+    mensaje += (
         f"💭 {señal.get('razon', '')[:200]}\n"
         f"🎯 Confianza: {conf:.0%}"
     )
@@ -525,17 +575,16 @@ class SignalEngine:
     """
     Motor de señales que monitoriza el mercado y genera alertas.
 
-    Fuentes de información usadas (por orden de importancia):
-    1. Newsletter de hoy (content_plan) — las palabras exactas de Adam
-    2. Tweets de Adam del día — actualizaciones en tiempo real
-    3. Metodología fija en el prompt del LLM
+    Fuentes de información (por orden de importancia):
+    1. Newsletter de hoy (content_plan completo)
+    2. Tweets de Adam del día
+    3. Metodología + ventanas horarias en el prompt del LLM
     4. Precio SPY/ES en tiempo real
     5. Velas de 15min para detección de Failed Breakdown
     """
 
     def __init__(self):
         self.feed = SPYFeed()
-        # Registro de señales enviadas para evitar duplicados (nivel → datetime)
         self._last_signal: dict = {}
 
     def _esta_en_cooldown(self, nivel: float, horas: float = 1.0) -> bool:
@@ -555,14 +604,13 @@ class SignalEngine:
 
         Flujo:
         1. Precio actual (SPY → ES)
-        2. Plan de Adam del día (newsletter completo + niveles extraídos)
+        2. Plan del día (newsletter completo)
         3. Tweets de Adam de hoy
-        4. Para cada nivel cercano al precio:
-           a. Detectar Failed Breakdown (elevator down + flush + recovery)
-           b. Si hay FB → preguntar al LLM con el newsletter completo + tweets
+        4. Ventana horaria actual
+        5. Para cada nivel cercano al precio (soportes Y resistencias):
+           a. Detectar Failed Breakdown
+           b. Preguntar al LLM con newsletter + tweets + hora del día
            c. Si el LLM dice entrar → alerta Telegram
-
-        Returns True si se generó alguna señal.
         """
         # ── 1. Precio actual ──────────────────────────────────────────────
         snapshot = self.feed.get_snapshot()
@@ -581,55 +629,62 @@ class SignalEngine:
         niveles = get_all_levels(today)
         bias    = today.get('bias', 'unknown')
 
-        # Filtrar niveles cercanos al precio (±60 pts — rango relevante del día)
+        # Todos los niveles dentro de ±60 pts (soportes Y resistencias)
+        # Las resistencias se incluyen porque pueden actuar como soporte
+        # cuando el precio hace backtest desde arriba (setup de Adam)
         niveles_cercanos = [
             n for n in niveles
             if abs(n['nivel'] - precio_es) <= 60
-            and n['tipo'] != 'resistencia'  # Adam no va short
         ]
 
-        print(f"[{ahora}] SPY:{precio_spy:.2f} ES:{precio_es:.1f} | "
-              f"Bias:{bias} | Niveles cercanos:{len(niveles_cercanos)}")
+        # ── 3. Ventana horaria ────────────────────────────────────────────
+        hora_est, ventana = get_trading_window()
 
-        # ── 3. Tweets de Adam de hoy ──────────────────────────────────────
+        print(f"[{ahora}] SPY:{precio_spy:.2f} ES:{precio_es:.1f} | "
+              f"Bias:{bias} | {hora_est} | Niveles cercanos:{len(niveles_cercanos)}")
+
+        # ── 4. Tweets de Adam de hoy ──────────────────────────────────────
         tweets_hoy = get_todays_tweets()
         if tweets_hoy:
             print(f"  🐦 {len(tweets_hoy)} tweets de Adam hoy")
 
-        # ── 4. Comprobar cada nivel cercano ───────────────────────────────
+        # ── 5. Comprobar cada nivel cercano ───────────────────────────────
         señal_enviada = False
 
         for nivel_info in niveles_cercanos:
-            nivel = nivel_info['nivel']
+            nivel      = nivel_info['nivel']
+            tipo_nivel = nivel_info['tipo']
 
             if not is_price_at_level(precio_es, nivel):
                 continue
             if self._esta_en_cooldown(nivel):
                 continue
 
-            # Dirección (Adam no va short → solo long)
+            # Dirección (solo long — Adam no va short)
             direccion = determinar_lado(precio_es, nivel_info, bias)
             if not direccion:
                 continue
 
-            # Obtener velas de 15min (8 barras = 2 horas de contexto)
+            # Velas de 15min
             bars_15 = self.feed.get_bars(15, 8)
 
-            # Detectar Failed Breakdown — requisito fundamental de Adam
+            # Detectar Failed Breakdown
             fb_info = detect_failed_breakdown(bars_15, nivel)
             print(f"  {'✅ FB' if fb_info['es_fb'] else '⚠️  No FB'} | "
-                  f"{fb_info['descripcion'][:80]}")
+                  f"Nivel:{nivel:.0f} ({tipo_nivel}) | "
+                  f"{fb_info['descripcion'][:70]}")
 
-            # Confirmación de vela 15min
             confirmado = confirmar_con_vela_15min(bars_15, nivel, direccion)
             print(f"  📊 {direccion.upper()} | "
-                  f"Vela 15min: {'✅ confirma' if confirmado else '⚠️ no confirma'}")
+                  f"15min: {'✅' if confirmado else '⚠️'} | "
+                  f"Ventana: {ventana[:40]}")
 
-            # Consultar LLM con newsletter completo + tweets
-            print("  🤖 Consultando LLM (newsletter completo + tweets del día)...")
+            # Consultar LLM
+            print("  🤖 Consultando LLM...")
             señal = generar_señal_llm(
                 precio_es  = precio_es,
                 nivel      = nivel,
+                tipo_nivel = tipo_nivel,
                 direccion  = direccion,
                 today      = today,
                 bars_15    = bars_15,
@@ -637,19 +692,18 @@ class SignalEngine:
                 tweets     = tweets_hoy,
             )
 
-            # Guardar la dirección real (no deducirla del texto)
             señal['direccion'] = direccion
 
             if señal.get('entrar'):
                 confianza = señal.get('confianza', 0)
                 print(f"  ✅ LLM: ENTRAR ({confianza:.0%} confianza)")
-                mensaje = formatear_alerta(señal, precio_es, nivel, today)
+                mensaje = formatear_alerta(señal, precio_es, nivel, today, hora_est)
                 await enviar_alerta(mensaje)
                 self._marcar_señalado(nivel)
                 señal_enviada = True
             else:
                 print(f"  ❌ LLM: No entrar — {señal.get('razon', '')[:100]}")
-                # Cooldown corto tras un "no" (15 min efectivos)
+                # Cooldown corto (15 min) tras un "no" para no llamar al LLM cada minuto
                 self._last_signal[f"{nivel:.0f}"] = (
                     datetime.now() - timedelta(minutes=45)
                 )
