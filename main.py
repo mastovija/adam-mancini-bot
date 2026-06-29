@@ -47,9 +47,30 @@ except ImportError:
 
 async def tarea_newsletter_diario():
     """
-    Se ejecuta cada día a las 7:30 AM EST.
+    Se ejecuta cada día a las 7:30 AM EST (lun-vie).
     Descarga el newsletter de hoy y envía el briefing matutino a Telegram.
+
+    FIX B-9 — doble briefing:
+    Si el bot arracó poco antes de las 7:30 AM (caso típico: arrancas a
+    las 7:15-7:25 EST), inicializar() ya habrá parseado el newsletter y
+    enviado el briefing. Sin esta guarda, el scheduler disparaba igualmente
+    a las 7:30 y mandaba un segundo briefing idéntico a Telegram.
+
+    Solución: si today.json fue modificado hace menos de GRACE_MINUTES,
+    inicializar() ya lo hizo — saltamos este ciclo.
     """
+    GRACE_MINUTES = 20   # ventana de gracia: si el archivo tiene <20 min, ya está hecho
+
+    from config import DATA_DIR
+    today_file = DATA_DIR / 'daily' / 'today.json'
+
+    if today_file.exists():
+        minutos = (datetime.now().timestamp() - today_file.stat().st_mtime) / 60
+        if minutos < GRACE_MINUTES:
+            print(f"\n⏰ [7:30 AM] Newsletter ya parseado hace {minutos:.0f} min "
+                  f"— omitiendo (inicializar() lo hizo al arrancar)")
+            return
+
     print("\n⏰ [7:30 AM] Parseando newsletter diario...")
     alerter = TelegramAlerter()
 
@@ -62,7 +83,10 @@ async def tarea_newsletter_diario():
             await alerter.send("⚠️ No se pudo obtener el newsletter de hoy")
     except Exception as e:
         print(f"❌ Error en tarea newsletter: {e}")
-        await alerter.send(f"❌ Error newsletter: {e}")
+        # parse_mode=None: este aviso es texto plano (sin etiquetas HTML) y la excepción {e}
+        # puede traer <, > o & (rutas, URLs con &, fragmentos del scrape). Sin esto, ese
+        # carácter rompería el parser HTML de Telegram y el aviso de error se perdería.
+        await alerter.send(f"❌ Error newsletter: {e}", parse_mode=None)
 
 
 # ─────────────────────────────────────────────
@@ -161,7 +185,10 @@ async def main():
         pass
     finally:
         if scheduler:
-            scheduler.shutdown(wait=False)
+            try:
+                scheduler.shutdown(wait=False)
+            except Exception:
+                pass  # El event loop ya está cerrado — error cosmético, no afecta al funcionamiento
 
 
 # ─────────────────────────────────────────────

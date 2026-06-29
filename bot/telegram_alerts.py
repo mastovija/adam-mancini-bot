@@ -270,6 +270,72 @@ class TelegramAlerter:
     # Test
     # ─────────────────────────────────────────────
 
+    # C-11: estos tres métodos completan la consolidación de alertas.
+    # signal_engine.py ya no necesita sus propias funciones formatear_alerta_*
+    # ni enviar_alerta — todo el formateo vive aquí, con HTML escapado.
+
+    async def send_t1_alert(self, trade: dict, precio_es: float):
+        """
+        T1 alcanzado — cerrar 75%, mover stop a breakeven, dejar runner.
+        Recibe el dict del trade activo tal como lo guarda signal_engine.py.
+        """
+        ganancia = precio_es - trade['entrada']
+        t2_str   = str(int(trade['t2'])) if trade.get('t2') else 'máximo posible'
+        await self.send(
+            f"✅ <b>T1 ALCANZADO — {int(trade['t1'])}</b>\n"
+            f"{'─' * 28}\n"
+            f"📈 Ganancia actual: <b>+{ganancia:.0f} pts</b>\n"
+            f"{'─' * 28}\n"
+            f"📋 <b>ACCIÓN (metodología Adam):</b>\n"
+            f"   1️⃣ Cerrar 75% ahora\n"
+            f"   2️⃣ Mover stop a BREAKEVEN <b>{trade['entrada']:.0f}</b>\n"
+            f"   3️⃣ Dejar runner → T2: {t2_str}\n"
+            f"{'─' * 28}\n"
+            f"🏃 Runner activo | Stop: <b>{trade['entrada']:.0f}</b> (breakeven)"
+        )
+
+    async def send_t2_alert(self, trade: dict, precio_es: float):
+        """
+        T2 alcanzado — cerrar runner. Trade completado.
+        """
+        ganancia_runner = precio_es - trade['entrada']
+        ganancia_t1     = trade['t1'] - trade['entrada']
+        await self.send(
+            f"🏆 <b>T2 ALCANZADO — {int(trade['t2'])}</b>\n"
+            f"{'─' * 28}\n"
+            f"📈 Ganancia runner: <b>+{ganancia_runner:.0f} pts</b>\n"
+            f"📈 T1 cobrado:      <b>+{ganancia_t1:.0f} pts</b> (75%)\n"
+            f"{'─' * 28}\n"
+            f"📋 Cerrar runner o trail stop muy ajustado\n"
+            f"✅ Trade completado según metodología Adam"
+        )
+
+    async def send_stop_alert(self, trade: dict, precio_es: float):
+        """
+        Stop hit — distingue stop original (pérdida) vs breakeven (runner).
+        """
+        if trade.get('t1_alcanzado'):
+            ganancia_t1 = trade['t1'] - trade['entrada']
+            await self.send(
+                f"🔄 <b>RUNNER CERRADO EN BREAKEVEN</b>\n"
+                f"{'─' * 28}\n"
+                f"📊 Entrada: {trade['entrada']:.0f} | Salida runner: {precio_es:.0f}\n"
+                f"💰 Runner: ≈0 pts (breakeven)\n"
+                f"✅ T1 cobrado: <b>+{ganancia_t1:.0f} pts</b> en el 75%\n"
+                f"{'─' * 28}\n"
+                f"📋 Adam: <i>'First trade is a win — stop trading'</i>"
+            )
+        else:
+            perdida = precio_es - trade['entrada']
+            await self.send(
+                f"🛑 <b>STOP LOSS TOCADO</b>\n"
+                f"{'─' * 28}\n"
+                f"📊 Entrada: {trade['entrada']:.0f} | Stop: {precio_es:.0f}\n"
+                f"📉 Resultado: <b>{perdida:.0f} pts</b>\n"
+                f"{'─' * 28}\n"
+                f"📋 Adam: <i>'First trade loss → one more attempt allowed today'</i>"
+            )
+
     async def send_test(self):
         """Envía un mensaje de prueba para verificar la conexión."""
         tz_ny = pytz.timezone(MARKET_TIMEZONE)

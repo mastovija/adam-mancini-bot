@@ -2,6 +2,9 @@
 market_data/alpaca_feed.py — Feed de precios SPY con Alpaca Markets
 ====================================================================
 Obtiene el precio de SPY en tiempo real usando la API gratuita de Alpaca.
+Mantenido como FALLBACK por si IBKR Gateway tiene problemas.
+
+PARA USAR ALPACA: cambiar DATA_SOURCE = 'alpaca' en config.py
 
 El feed IEX que usa la cuenta gratuita NO tiene 15 minutos de delay —
 es precio real pero solo cubre ~2-3% del volumen. Para detectar si el
@@ -63,7 +66,7 @@ except ImportError:
 def is_market_open() -> bool:
     """
     Comprueba si el mercado NYSE está abierto ahora mismo.
-    Horario: lunes-viernes, 9:30-16:00 EST (o el que tengas en config.py)
+    Horario: lunes-viernes, 7:30-16:00 EST (configurado en config.py)
     """
     tz = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz)
@@ -85,7 +88,6 @@ def tiempo_hasta_apertura() -> int:
     tz = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz)
 
-    # Calcular próxima apertura
     apertura_hoy = ahora.replace(
         hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MIN, second=0, microsecond=0
     )
@@ -93,7 +95,6 @@ def tiempo_hasta_apertura() -> int:
     if ahora < apertura_hoy and ahora.weekday() < 5:
         return int((apertura_hoy - ahora).total_seconds())
 
-    # Buscar el próximo día de semana
     dias_hasta = 1
     while True:
         proximo = ahora + timedelta(days=dias_hasta)
@@ -112,38 +113,29 @@ def tiempo_hasta_apertura() -> int:
 class SPYFeed:
     """
     Obtiene datos de precio de SPY desde Alpaca Markets.
+    Fallback cuando IBKR Gateway no está disponible.
 
-    Uso básico:
-        feed = SPYFeed()
-        snapshot = feed.get_snapshot()
-        print(snapshot['es_equivalent'])  # nivel ES equivalente
+    NOTA: get_bars() tiene versión ASYNC para compatibilidad con signal_engine,
+    que usa 'await self.feed.get_bars()' (requerido por ESFeed/IBKR).
     """
 
     def __init__(self):
         if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
             raise ValueError(
                 "Faltan credenciales de Alpaca en .env\n"
-                "Crea una cuenta gratuita en alpaca.markets y añade:\n"
                 "  ALPACA_API_KEY=...\n  ALPACA_SECRET_KEY=..."
             )
-        # El cliente de datos históricos y latest — funciona con cuenta paper gratuita
         self.client = StockHistoricalDataClient(
             api_key=ALPACA_API_KEY,
             secret_key=ALPACA_SECRET_KEY,
         )
 
     def get_latest_bar(self) -> Optional[dict]:
-        """
-        Obtiene la barra de 1 minuto más reciente de SPY.
-
-        Returns:
-            Dict con open, high, low, close, volume, timestamp
-            o None si hay error o mercado cerrado
-        """
+        """Obtiene la barra de 1 minuto más reciente de SPY."""
         try:
             request = StockLatestBarRequest(
                 symbol_or_symbols=MARKET_TICKER,
-                feed='iex',  # feed gratuito — real-time con ~2-3% del volumen
+                feed='iex',
             )
             bars = self.client.get_stock_latest_bar(request)
             bar = bars.get(MARKET_TICKER)
@@ -164,38 +156,22 @@ class SPYFeed:
             return None
 
     def get_recent_bars(self, n: int = 20) -> list:
-        """
-        Obtiene las últimas N barras de 1 minuto de SPY.
-        Útil para calcular tendencia y momentum a corto plazo.
-
-        Args:
-            n: número de barras (minutos hacia atrás)
-
-        Returns:
-            Lista de dicts con OHLCV, ordenados del más antiguo al más nuevo
-        """
+        """Obtiene las últimas N barras de 1 minuto de SPY."""
         try:
-            utc = pytz.UTC
-            # Pedimos un poco más para asegurar que tenemos N barras completas
+            utc   = pytz.UTC
             start = datetime.now(utc) - timedelta(minutes=n + 10)
             end   = datetime.now(utc)
 
             request = StockBarsRequest(
                 symbol_or_symbols=MARKET_TICKER,
                 timeframe=TimeFrame(1, TimeFrameUnit.Minute),
-                start=start,
-                end=end,
-                feed='iex',
+                start=start, end=end, feed='iex',
             )
             bars_data = self.client.get_stock_bars(request)
-            # alpaca-py cambió el formato — manejamos ambas versiones
             try:
                 bars = list(bars_data[MARKET_TICKER])
             except (KeyError, TypeError):
-                try:
-                    bars = list(bars_data.data.get(MARKET_TICKER, []))
-                except Exception:
-                    bars = []
+                bars = list(bars_data.data.get(MARKET_TICKER, []))
 
             return [
                 {
@@ -206,28 +182,26 @@ class SPYFeed:
                     'volume':    int(b.volume),
                     'timestamp': b.timestamp.isoformat() if b.timestamp else '',
                 }
-                for b in bars[-n:]  # Solo las últimas N
+                for b in bars[-n:]
             ]
         except Exception as e:
             print(f"  ⚠️  Error obteniendo barras recientes: {e}")
             return []
-    
-    def get_bars(self, timeframe_minutes: int = 15, n: int = 10) -> list:
+
+    def _get_bars_sync(self, timeframe_minutes: int = 15, n: int = 10) -> list:
         """
-        Obtiene las últimas N barras del timeframe indicado.
-        Por defecto 15 minutos — el timeframe principal de Adam.
+        Versión síncrona interna de get_bars.
+        Llamada desde el wrapper async get_bars() y desde get_snapshot().
         """
         try:
-            utc = pytz.UTC
+            utc   = pytz.UTC
             start = datetime.now(utc) - timedelta(minutes=(timeframe_minutes * n) + 30)
             end   = datetime.now(utc)
 
             request = StockBarsRequest(
                 symbol_or_symbols=MARKET_TICKER,
                 timeframe=TimeFrame(timeframe_minutes, TimeFrameUnit.Minute),
-                start=start,
-                end=end,
-                feed='iex',
+                start=start, end=end, feed='iex',
             )
             bars_data = self.client.get_stock_bars(request)
             try:
@@ -250,44 +224,44 @@ class SPYFeed:
             print(f"  ⚠️  Error obteniendo barras {timeframe_minutes}min: {e}")
             return []
 
-    def spy_to_es(self, spy_price: float) -> float:
+    async def get_bars(self, timeframe_minutes: int = 15, n: int = 10) -> list:
         """
-        Convierte precio de SPY a nivel equivalente del ES futures.
+        Versión ASYNC de get_bars — requerida por signal_engine que usa 'await'.
 
-        Adam habla de niveles como 7527, 7474, etc. (ES/SPX).
-        SPY cotiza ~10x más bajo: SPY 540 ≈ ES 5400.
-        Multiplicamos por SPY_TO_ES_MULTIPLIER (10.0 en config.py).
+        signal_engine llama 'await self.feed.get_bars()' porque ESFeed (IBKR)
+        necesita la versión async (usa reqHistoricalDataAsync internamente).
+        Este wrapper hace que SPYFeed sea compatible sin cambiar signal_engine.
+
+        Alpaca usa requests HTTP síncronos, pero envolver la llamada en una
+        corutina la hace 'awaitable' sin ningún cambio de comportamiento real.
+        No bloquea el event loop porque la llamada HTTP es rápida (~200ms).
         """
+        return self._get_bars_sync(timeframe_minutes, n)
+
+    def spy_to_es(self, spy_price: float) -> float:
+        """Convierte precio de SPY a nivel ES (SPY * 10 ≈ ES)."""
         return round(spy_price * SPY_TO_ES_MULTIPLIER, 1)
 
     def get_snapshot(self) -> Optional[dict]:
         """
         Obtiene todo lo necesario para el motor de señales en una sola llamada.
-
-        Incluye guarda anti-precio-obsoleto: si la última barra de Alpaca
-        tiene más de 10 minutos (festivo NYSE no detectado, sin volumen IEX
-        en premarket, etc.), devuelve None para no disparar señales falsas.
+        Incluye guarda anti-precio-obsoleto: más de 10 min → ignorar.
         """
         bar = self.get_latest_bar()
         if not bar:
             return None
 
-        # ── Guarda contra precios obsoletos ──────────────────────────────
-        # Alpaca devuelve la última barra disponible aunque sea de hace horas.
-        # Más de 10 minutos de antigüedad = dato no fiable para señales.
         if bar.get('timestamp'):
             try:
                 bar_ts = datetime.fromisoformat(bar['timestamp'])
-                # Hacer timezone-aware si no lo es
                 if bar_ts.tzinfo is None:
                     bar_ts = bar_ts.replace(tzinfo=pytz.UTC)
-                ahora_utc = datetime.now(pytz.UTC)
-                edad_segundos = (ahora_utc - bar_ts).total_seconds()
-                if edad_segundos > 600:  # 10 minutos
+                edad_segundos = (datetime.now(pytz.UTC) - bar_ts).total_seconds()
+                if edad_segundos > 600:
                     print(f"  ⚠️  Barra obsoleta ({edad_segundos/60:.0f} min) — ignorando")
                     return None
             except Exception:
-                pass  # Si no podemos parsear el timestamp, continuamos
+                pass
 
         spy_price     = bar['close']
         es_equivalent = self.spy_to_es(spy_price)
@@ -302,37 +276,21 @@ class SPYFeed:
 
 
 # ─────────────────────────────────────────────
-# Loop de polling para el motor de señales
+# Loop de polling (legacy)
 # ─────────────────────────────────────────────
 
 async def run_market_loop(callback, interval_seconds: int = 60):
-    """
-    Ejecuta un callback cada 'interval_seconds' segundos con el snapshot del mercado.
-    Fuera de horario de mercado espera en modo eficiente.
-
-    Cómo usarlo desde la Fase 5:
-        async def mi_callback(snapshot):
-            precio_es = snapshot['es_equivalent']
-            # ... detectar si está en un nivel de Adam
-
-        asyncio.run(run_market_loop(mi_callback))
-
-    Args:
-        callback:         función async que recibe el snapshot de mercado
-        interval_seconds: segundos entre cada lectura (default: 60 = 1 minuto)
-    """
+    """Loop de mercado para uso externo con callback."""
     feed = SPYFeed()
     print(f"📊 Feed de mercado iniciado | {MARKET_TICKER} cada {interval_seconds}s")
 
     while True:
         if not is_market_open():
-            espera = min(tiempo_hasta_apertura(), 300)  # máx 5 min de espera
-            minutos = espera // 60
-            print(f"  😴 Mercado cerrado — próxima comprobación en {minutos} min")
+            espera = min(tiempo_hasta_apertura(), 300)
+            print(f"  😴 Mercado cerrado — próxima comprobación en {espera//60} min")
             await asyncio.sleep(espera)
             continue
 
-        # Obtener datos y ejecutar callback
         snapshot = feed.get_snapshot()
         if snapshot:
             await callback(snapshot)
@@ -348,11 +306,11 @@ async def run_market_loop(callback, interval_seconds: int = 60):
 
 def test_feed():
     """
-    Prueba la conexión con Alpaca y muestra el precio actual de SPY.
+    Prueba la conexión con Alpaca.
     Ejecuta con: python market_data/alpaca_feed.py
     """
     print("=" * 50)
-    print("  Test Feed Alpaca — SPY")
+    print("  Test Feed Alpaca — SPY (fallback)")
     print("=" * 50)
     print(f"⏰ Mercado: {'🟢 ABIERTO' if is_market_open() else '🔴 CERRADO'}")
 
@@ -363,26 +321,9 @@ def test_feed():
 
     if snapshot:
         print(f"\n✅ Conexión exitosa")
-        print(f"   SPY:          ${snapshot['spy_price']:.2f}")
-        print(f"   ES equivalent: {snapshot['es_equivalent']:.1f}")
-        print(f"   Timestamp:    {snapshot['timestamp']}")
-        print(f"\n   Barra 1min:")
-        bar = snapshot['bar']
-        print(f"   O:{bar['open']:.2f} H:{bar['high']:.2f} "
-              f"L:{bar['low']:.2f} C:{bar['close']:.2f} "
-              f"Vol:{bar['volume']:,}")
-
-        # Barras recientes
-        print(f"\n📈 Últimas 5 barras de 1 minuto:")
-        bars = feed.get_recent_bars(5)
-        if bars:
-            for b in bars:
-                print(f"   {b['timestamp'][11:16]} | "
-                      f"C:{b['close']:.2f} | "
-                      f"ES:{feed.spy_to_es(b['close']):.1f} | "
-                      f"Vol:{b['volume']:,}")
-        else:
-            print("   (Sin barras — puede que el mercado esté cerrado)")
+        print(f"   SPY:           ${snapshot['spy_price']:.2f}")
+        print(f"   ES equivalent:  {snapshot['es_equivalent']:.1f}")
+        print(f"   Timestamp:     {snapshot['timestamp']}")
     else:
         print("❌ No se pudo obtener datos")
         print("   Verifica ALPACA_API_KEY y ALPACA_SECRET_KEY en .env")
