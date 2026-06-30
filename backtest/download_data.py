@@ -29,7 +29,7 @@ try:
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 except ImportError:
-    print("❌ alpaca-py no instalado. Ejecuta: pip install alpaca-py")
+    print("❌ alpaca-py not installed. Run: pip install alpaca-py")
     sys.exit(1)
 
 
@@ -109,7 +109,7 @@ def descargar_dia(client, fecha: datetime) -> list:
         bars_data = client.get_stock_bars(request)
         return bars_to_list(bars_data)
     except Exception as e:
-        print(f"  ⚠️  Error descargando {fecha.date()}: {e}")
+        print(f"  ⚠️  Error downloading {fecha.date()}: {e}")
         return []
 
 
@@ -123,10 +123,10 @@ def download_historical_data():
     Guarda un JSON por día de trading.
     """
     print("=" * 55)
-    print("  Backtesting — Descarga Datos Históricos SPY")
+    print("  Backtesting — Download Historical SPY Data")
     print("=" * 55)
-    print(f"📅 Período: {DATE_START.date()} → {DATE_END.date()}")
-    print(f"📁 Guardando en: {BARS_DIR}\n")
+    print(f"📅 Period: {DATE_START.date()} → {DATE_END.date()}")
+    print(f"📁 Saving to: {BARS_DIR}\n")
 
     BARS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -143,19 +143,19 @@ def download_historical_data():
             dias.append(current)
         current += timedelta(days=1)
 
-    print(f"📊 Días laborables en el período: {len(dias)}")
+    print(f"📊 Weekdays in the period: {len(dias)}")
 
     # Ver cuáles ya tenemos descargados
     existentes = {f.stem for f in BARS_DIR.glob('*.json') if f.stem != 'index'}
     por_descargar = [d for d in dias if str(d.date()) not in existentes]
-    print(f"✅ Ya descargados: {len(existentes)}")
-    print(f"🆕 Por descargar: {len(por_descargar)}\n")
+    print(f"✅ Already downloaded: {len(existentes)}")
+    print(f"🆕 To download: {len(por_descargar)}\n")
 
     if not por_descargar:
-        print("✅ Todos los datos ya están descargados")
+        print("✅ All data already downloaded")
         return
 
-    print("📥 Descargando...")
+    print("📥 Downloading...")
     print("-" * 40)
 
     descargados = 0
@@ -172,10 +172,10 @@ def download_historical_data():
             output = BARS_DIR / f"{fecha_str}.json"
             with open(output, 'w') as f:
                 json.dump(bars, f)
-            print(f"{len(bars)} barras ✅")
+            print(f"{len(bars)} bars ✅")
             descargados += 1
         else:
-            print("sin datos (festivo o error)")
+            print("no data (holiday or error)")
             vacios += 1
 
         # Pausa entre requests para no saturar la API
@@ -188,11 +188,11 @@ def download_historical_data():
         json.dump(dias_disponibles, f, indent=2)
 
     print("\n" + "=" * 55)
-    print(f"✅ Descarga completada")
-    print(f"   Días con datos: {descargados}")
-    print(f"   Días sin datos: {vacios} (festivos/fines de semana)")
-    print(f"   Total en disco: {len(dias_disponibles)} días")
-    print(f"📁 Directorio: {BARS_DIR}")
+    print(f"✅ Download complete")
+    print(f"   Days with data: {descargados}")
+    print(f"   Days without data: {vacios} (holidays/weekends)")
+    print(f"   Total on disk: {len(dias_disponibles)} days")
+    print(f"📁 Directory: {BARS_DIR}")
     print("=" * 55)
 
 

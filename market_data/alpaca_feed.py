@@ -55,7 +55,7 @@ try:
     )
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 except ImportError:
-    print("❌ alpaca-py no instalado. Ejecuta: pip install alpaca-py")
+    print("❌ alpaca-py not installed. Run: pip install alpaca-py")
     sys.exit(1)
 
 
@@ -152,7 +152,7 @@ class SPYFeed:
                 'timestamp': bar.timestamp.isoformat() if bar.timestamp else '',
             }
         except Exception as e:
-            print(f"  ⚠️  Error obteniendo barra: {e}")
+            print(f"  ⚠️  Error fetching bar: {e}")
             return None
 
     def get_recent_bars(self, n: int = 20) -> list:
@@ -185,7 +185,7 @@ class SPYFeed:
                 for b in bars[-n:]
             ]
         except Exception as e:
-            print(f"  ⚠️  Error obteniendo barras recientes: {e}")
+            print(f"  ⚠️  Error fetching recent bars: {e}")
             return []
 
     def _get_bars_sync(self, timeframe_minutes: int = 15, n: int = 10) -> list:
@@ -221,7 +221,7 @@ class SPYFeed:
                 for b in bars[-n:]
             ]
         except Exception as e:
-            print(f"  ⚠️  Error obteniendo barras {timeframe_minutes}min: {e}")
+            print(f"  ⚠️  Error fetching {timeframe_minutes}min bars: {e}")
             return []
 
     async def get_bars(self, timeframe_minutes: int = 15, n: int = 10) -> list:
@@ -258,7 +258,7 @@ class SPYFeed:
                     bar_ts = bar_ts.replace(tzinfo=pytz.UTC)
                 edad_segundos = (datetime.now(pytz.UTC) - bar_ts).total_seconds()
                 if edad_segundos > 600:
-                    print(f"  ⚠️  Barra obsoleta ({edad_segundos/60:.0f} min) — ignorando")
+                    print(f"  ⚠️  Stale bar ({edad_segundos/60:.0f} min) — ignoring")
                     return None
             except Exception:
                 pass
@@ -282,12 +282,12 @@ class SPYFeed:
 async def run_market_loop(callback, interval_seconds: int = 60):
     """Loop de mercado para uso externo con callback."""
     feed = SPYFeed()
-    print(f"📊 Feed de mercado iniciado | {MARKET_TICKER} cada {interval_seconds}s")
+    print(f"📊 Market feed started | {MARKET_TICKER} every {interval_seconds}s")
 
     while True:
         if not is_market_open():
             espera = min(tiempo_hasta_apertura(), 300)
-            print(f"  😴 Mercado cerrado — próxima comprobación en {espera//60} min")
+            print(f"  😴 Market closed — next check in {espera//60} min")
             await asyncio.sleep(espera)
             continue
 
@@ -295,7 +295,7 @@ async def run_market_loop(callback, interval_seconds: int = 60):
         if snapshot:
             await callback(snapshot)
         else:
-            print("  ⚠️  Sin datos de mercado")
+            print("  ⚠️  No market data")
 
         await asyncio.sleep(interval_seconds)
 
@@ -310,23 +310,23 @@ def test_feed():
     Ejecuta con: python market_data/alpaca_feed.py
     """
     print("=" * 50)
-    print("  Test Feed Alpaca — SPY (fallback)")
+    print("  Alpaca Feed Test — SPY (fallback)")
     print("=" * 50)
-    print(f"⏰ Mercado: {'🟢 ABIERTO' if is_market_open() else '🔴 CERRADO'}")
+    print(f"⏰ Market: {'🟢 OPEN' if is_market_open() else '🔴 CLOSED'}")
 
     feed = SPYFeed()
 
-    print(f"\n📊 Obteniendo precio de {MARKET_TICKER}...")
+    print(f"\n📊 Fetching {MARKET_TICKER} price...")
     snapshot = feed.get_snapshot()
 
     if snapshot:
-        print(f"\n✅ Conexión exitosa")
+        print(f"\n✅ Connection successful")
         print(f"   SPY:           ${snapshot['spy_price']:.2f}")
         print(f"   ES equivalent:  {snapshot['es_equivalent']:.1f}")
         print(f"   Timestamp:     {snapshot['timestamp']}")
     else:
-        print("❌ No se pudo obtener datos")
-        print("   Verifica ALPACA_API_KEY y ALPACA_SECRET_KEY en .env")
+        print("❌ Could not fetch data")
+        print("   Check ALPACA_API_KEY and ALPACA_SECRET_KEY in .env")
 
 
 if __name__ == '__main__':

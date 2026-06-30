@@ -68,10 +68,10 @@ def load_spy_data() -> pd.DataFrame:
     if SPY_15MIN_FILE.exists():
         df = pd.read_csv(SPY_15MIN_FILE)
     else:
-        print("⚠️ spy_15min.csv no existe. Intentando cargar desde JSON 1-min...")
+        print("⚠️ spy_15min.csv does not exist. Trying to load from 1-min JSON...")
         df = load_spy_data_from_json()
         if df is None or df.empty:
-            print("❌ No hay datos históricos. Ejecuta primero:")
+            print("❌ No historical data. Run first:")
             print("   python backtest/download_data.py")
             sys.exit(1)
         df = resample_spy_to_15min(df)
@@ -323,26 +323,26 @@ def print_edge_report(señales: list):
     ¿sube ES de media en los siguientes 15/30/60 minutos?
     """
     if not señales:
-        print("Sin señales para analizar.")
+        print("No signals to analyze.")
         return
 
     fb_señales = [s for s in señales if s.get('es_fb')]
     no_fb      = [s for s in señales if not s.get('es_fb')]
 
     print(f"\n{'='*60}")
-    print(f"  ANÁLISIS DE EDGE — FORWARD RETURNS")
+    print(f"  EDGE ANALYSIS — FORWARD RETURNS")
     print(f"{'='*60}")
-    print(f"\n📊 Total señales:         {len(señales)}")
-    print(f"   Con Failed Breakdown:  {len(fb_señales)}")
-    print(f"   Sin FB (referencia):   {len(no_fb)}")
+    print(f"\n📊 Total signals:         {len(señales)}")
+    print(f"   With Failed Breakdown: {len(fb_señales)}")
+    print(f"   Without FB (reference):{len(no_fb)}")
 
-    for nombre, grupo in [("CON Failed Breakdown", fb_señales),
-                           ("SIN Failed Breakdown (referencia)", no_fb)]:
+    for nombre, grupo in [("WITH Failed Breakdown", fb_señales),
+                           ("WITHOUT Failed Breakdown (reference)", no_fb)]:
         if not grupo:
             continue
 
         print(f"\n{'─'*45}")
-        print(f"  {nombre} ({len(grupo)} señales)")
+        print(f"  {nombre} ({len(grupo)} signals)")
         print(f"{'─'*45}")
 
         for ventana, campo in [("15 min", 'ret_15min'),
@@ -357,14 +357,14 @@ def print_edge_report(señales: list):
             pct_pos   = positivos / len(valores) * 100
             signo     = '🟢' if media > 0 else '🔴'
 
-            print(f"  {signo} +{ventana}:  media {media:+.1f} pts | "
-                  f"{pct_pos:.0f}% positivos ({positivos}/{len(valores)})")
+            print(f"  {signo} +{ventana}:  mean {media:+.1f} pts | "
+                  f"{pct_pos:.0f}% positive ({positivos}/{len(valores)})")
 
-        if 'CON' in nombre:
+        if nombre.startswith('WITH '):
             flushes = [s['flush_size'] for s in grupo if s.get('flush_size', 0) > 0]
             if flushes:
-                print(f"\n  📐 Flush medio: {sum(flushes)/len(flushes):.1f} pts ES")
-                print(f"     Rango: {min(flushes):.0f} – {max(flushes):.0f} pts")
+                print(f"\n  📐 Mean flush: {sum(flushes)/len(flushes):.1f} pts ES")
+                print(f"     Range: {min(flushes):.0f} – {max(flushes):.0f} pts")
 
     # Top 5 mejores por retorno a 60 min
     mejores = sorted(
@@ -372,10 +372,10 @@ def print_edge_report(señales: list):
         key=lambda x: x['ret_60min'], reverse=True
     )[:5]
     if mejores:
-        print(f"\n🏆 Top 5 señales (por retorno a 60 min):")
+        print(f"\n🏆 Top 5 signals (by 60-min return):")
         for s in mejores:
             fb_tag = '✅ FB' if s.get('es_fb') else '⚠️   '
-            print(f"   {fb_tag} {s['fecha']} nivel {s['nivel_es']:.0f} "
+            print(f"   {fb_tag} {s['fecha']} level {s['nivel_es']:.0f} "
                   f"flush:{s.get('flush_size', 0):.0f}pts | "
                   f"+15:{s.get('ret_15min', 0):+.0f} "
                   f"+30:{s.get('ret_30min', 0):+.0f} "
@@ -388,17 +388,17 @@ def print_edge_report(señales: list):
         pct_pos_global = sum(1 for v in all_ret30 if v > 0) / len(all_ret30) * 100
         print(f"\n{'='*60}")
         if media_global > 2 and pct_pos_global >= 60:
-            print(f"🎉 EDGE CONFIRMADO: +{media_global:.1f} pts media a 30min, "
-                  f"{pct_pos_global:.0f}% positivos — el bot tiene edge real.")
+            print(f"🎉 EDGE CONFIRMED: +{media_global:.1f} pts mean at 30min, "
+                  f"{pct_pos_global:.0f}% positive — the bot has real edge.")
         elif media_global > 0 and pct_pos_global >= 55:
-            print(f"✅ Edge moderado: +{media_global:.1f} pts media a 30min, "
-                  f"{pct_pos_global:.0f}% positivos — monitoriza más sesiones.")
+            print(f"✅ Moderate edge: +{media_global:.1f} pts mean at 30min, "
+                  f"{pct_pos_global:.0f}% positive — monitor more sessions.")
         elif media_global > 0:
-            print(f"⚠️  Edge débil: +{media_global:.1f} pts media a 30min, "
-                  f"{pct_pos_global:.0f}% positivos — ajustar parámetros.")
+            print(f"⚠️  Weak edge: +{media_global:.1f} pts mean at 30min, "
+                  f"{pct_pos_global:.0f}% positive — adjust parameters.")
         else:
-            print(f"❌ Sin edge detectado: {media_global:.1f} pts media a 30min.")
-            print(f"   Revisar calidad de niveles o parámetros de detección.")
+            print(f"❌ No edge detected: {media_global:.1f} pts mean at 30min.")
+            print(f"   Review level quality or detection parameters.")
 
 
 # ─────────────────────────────────────────────
@@ -417,33 +417,33 @@ def run_backtest():
     5. Reporta si el bot tiene edge estadístico real
     """
     print("=" * 60)
-    print("  Bot Adam Mancini — Backtesting Fase 7")
+    print("  Adam Mancini Bot — Backtesting Phase 7")
     print("=" * 60)
 
-    print("\n📥 Cargando datos...")
+    print("\n📥 Loading data...")
     df_spy         = load_spy_data()
     newsletters    = load_newsletters_by_date()
     tweets_by_date = load_tweets_by_date()
 
-    print(f"   SPY 15min:   {len(df_spy):,} barras")
-    print(f"   Newsletters: {len(newsletters)} días")
+    print(f"   SPY 15min:   {len(df_spy):,} bars")
+    print(f"   Newsletters: {len(newsletters)} days")
     print(f"   Tweets:      {sum(len(v) for v in tweets_by_date.values())} tweets "
-          f"en {len(tweets_by_date)} días")
+          f"across {len(tweets_by_date)} days")
 
     dias_trading = sorted(df_spy['date'].unique())
     dias_con_nl  = [d for d in dias_trading if d in newsletters]
 
-    print(f"\n📅 Días para backtest: {len(dias_con_nl)} "
+    print(f"\n📅 Days for backtest: {len(dias_con_nl)} "
           f"({dias_con_nl[0] if dias_con_nl else '?'} → "
           f"{dias_con_nl[-1] if dias_con_nl else '?'})")
     print(f"   MIN_FLUSH_PTS: {MIN_FLUSH_PTS} pts")
-    print(f"   RANGO_NIVELES: ±{RANGO_NIVELES_DIA} pts del precio mediano")
+    print(f"   RANGO_NIVELES: ±{RANGO_NIVELES_DIA} pts from median price")
 
     if not dias_con_nl:
-        print("❌ Sin días para testear. Revisa los datos.")
+        print("❌ No days to test. Check the data.")
         return
 
-    print("\n🔄 Simulando...\n")
+    print("\n🔄 Simulating...\n")
 
     señales_generadas = []
 
@@ -516,33 +516,33 @@ def run_backtest():
     dias_sin_señal = total_dias - total_señales
 
     print("=" * 60)
-    print("  REPORTE DE BACKTESTING")
+    print("  BACKTESTING REPORT")
     print("=" * 60)
-    print(f"\n📅 Período:             {dias_con_nl[0]} → {dias_con_nl[-1]}")
-    print(f"📊 Días testeados:      {total_dias}")
-    print(f"📊 Días con FB señal:   {total_señales} "
-          f"({total_señales/total_dias*100:.0f}% de los días)")
-    print(f"📊 Días sin FB (chop):  {dias_sin_señal}")
+    print(f"\n📅 Period:              {dias_con_nl[0]} → {dias_con_nl[-1]}")
+    print(f"📊 Days tested:         {total_dias}")
+    print(f"📊 Days with FB signal: {total_señales} "
+          f"({total_señales/total_dias*100:.0f}% of days)")
+    print(f"📊 Days without FB (chop): {dias_sin_señal}")
 
     print_edge_report(señales_generadas)
 
     if señales_generadas:
-        print("\n📍 Top niveles con FB detectado:")
+        print("\n📍 Top levels with FB detected:")
         contador = Counter(int(s['nivel_es']) for s in señales_generadas)
         for nivel, count in contador.most_common(5):
             rets = [s.get('ret_30min') for s in señales_generadas
                     if int(s['nivel_es']) == nivel and s.get('ret_30min') is not None]
             media = sum(rets) / len(rets) if rets else 0
             signo = '🟢' if media > 0 else '🔴'
-            print(f"   {signo} {nivel}: {count}x | ret medio 30min: {media:+.1f} pts")
+            print(f"   {signo} {nivel}: {count}x | mean 30min ret: {media:+.1f} pts")
 
-        print("\n📋 Últimas 5 señales:")
+        print("\n📋 Last 5 signals:")
         for s in señales_generadas[-5:]:
             r15 = f"{s['ret_15min']:+.0f}" if s.get('ret_15min') is not None else '?'
             r30 = f"{s['ret_30min']:+.0f}" if s.get('ret_30min') is not None else '?'
             r60 = f"{s['ret_60min']:+.0f}" if s.get('ret_60min') is not None else '?'
             tw  = f" tweets:{s['adam_tweets']}" if s.get('adam_tweets') else ''
-            print(f"   {s['fecha']} nivel {s['nivel_es']:.0f} "
+            print(f"   {s['fecha']} level {s['nivel_es']:.0f} "
                   f"flush:{s['flush_size']:.0f}pts | "
                   f"+15:{r15} +30:{r30} +60:{r60}{tw}")
 
@@ -563,7 +563,7 @@ def run_backtest():
     if señales_generadas:
         pd.DataFrame(señales_generadas).to_csv(SIGNALS_FILE, index=False)
 
-    print(f"\n💾 Reporte: {REPORT_FILE}")
+    print(f"\n💾 Report: {REPORT_FILE}")
     print(f"💾 CSV:     {SIGNALS_FILE}")
     print("=" * 60)
 

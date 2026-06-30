@@ -58,7 +58,7 @@ from config import (
 try:
     from twikit import Client
 except ImportError:
-    print("❌ twikit no instalado. Ejecuta: pip install twikit")
+    print("❌ twikit not installed. Run: pip install twikit")
     sys.exit(1)
 
 
@@ -98,13 +98,13 @@ def load_browser_cookies(client: Client):
     Las convertimos al formato que twikit entiende.
     """
     if not COOKIES_FILE.exists():
-        print(f"❌ No se encontró el archivo de cookies: {COOKIES_FILE}")
+        print(f"❌ Cookies file not found: {COOKIES_FILE}")
         print()
-        print("Para obtener las cookies:")
-        print("  1. Instala 'Cookie-Editor' en Chrome (extensión gratuita)")
-        print("  2. Ve a x.com con tu sesión iniciada")
-        print("  3. Clic en Cookie-Editor → Export → Export as JSON")
-        print(f"  4. Guarda el JSON en: {COOKIES_FILE}")
+        print("To get the cookies:")
+        print("  1. Install 'Cookie-Editor' in Chrome (free extension)")
+        print("  2. Go to x.com while logged in")
+        print("  3. Click Cookie-Editor → Export → Export as JSON")
+        print(f"  4. Save the JSON to: {COOKIES_FILE}")
         return False
 
     with open(COOKIES_FILE, 'r', encoding='utf-8') as f:
@@ -119,13 +119,13 @@ def load_browser_cookies(client: Client):
         # Formato simple: {"auth_token": "xxx", ...}
         cookie_dict = cookies_data
     else:
-        print("❌ Formato de cookies no reconocido")
+        print("❌ Unrecognized cookie format")
         return False
 
     # Verificar que tiene las cookies esenciales de Twitter
     if 'auth_token' not in cookie_dict:
-        print("❌ Las cookies no contienen 'auth_token'")
-        print("   Asegúrate de exportar las cookies de x.com (no de twitter.com)")
+        print("❌ The cookies do not contain 'auth_token'")
+        print("   Make sure to export the cookies from x.com (not twitter.com)")
         return False
 
     # Cargar las cookies en el cliente twikit
@@ -158,28 +158,28 @@ async def scrape_adam_tweets():
     Sin login programático → sin bloqueo de Cloudflare.
     """
     print("=" * 55)
-    print("  Bot Adam Mancini — Scraper de Tweets (v3)")
+    print("  Adam Mancini Bot — Tweet Scraper (v3)")
     print("=" * 55)
-    print(f"🎯 Objetivo: @{TWITTER_TARGET}")
-    print(f"📁 Guardando en: {OUTPUT_FILE}\n")
+    print(f"🎯 Target: @{TWITTER_TARGET}")
+    print(f"📁 Saving to: {OUTPUT_FILE}\n")
 
     # ── Cargar cookies del navegador ──────────────────────────────────────
-    print("🍪 Cargando cookies del navegador...")
+    print("🍪 Loading browser cookies...")
     client = Client('en-US')
 
     if not load_browser_cookies(client):
         return
 
-    print("✅ Cookies cargadas\n")
+    print("✅ Cookies loaded\n")
 
     # ── Obtener perfil de Adam ────────────────────────────────────────────
-    print(f"🔍 Buscando perfil de @{TWITTER_TARGET}...")
+    print(f"🔍 Looking up profile @{TWITTER_TARGET}...")
     try:
         user = await client.get_user_by_screen_name(TWITTER_TARGET)
-        print(f"✅ Encontrado: {user.name} (seguidores: {user.followers_count:,})\n")
+        print(f"✅ Found: {user.name} (followers: {user.followers_count:,})\n")
     except Exception as e:
-        print(f"❌ Error buscando usuario: {e}")
-        print("   Las cookies pueden haber expirado. Expórtalas de nuevo desde Chrome.")
+        print(f"❌ Error looking up user: {e}")
+        print("   The cookies may have expired. Export them again from Chrome.")
         return
 
     # ── Cargar tweets ya descargados ──────────────────────────────────────
@@ -188,10 +188,10 @@ async def scrape_adam_tweets():
     all_tweets      = existing_tweets.copy()
 
     if existing_tweets:
-        print(f"📂 Reanudando: {len(existing_tweets)} tweets ya descargados.\n")
+        print(f"📂 Resuming: {len(existing_tweets)} tweets already downloaded.\n")
 
     # ── Descarga paginada ─────────────────────────────────────────────────
-    print("📥 Descargando tweets...")
+    print("📥 Downloading tweets...")
     print("-" * 40)
 
     page_num  = 1
@@ -218,14 +218,14 @@ async def scrape_adam_tweets():
                 page_new  += 1
                 new_count += 1
 
-            print(f"  Página {page_num:3d}: +{page_new:3d} nuevos | "
+            print(f"  Page {page_num:3d}: +{page_new:3d} new | "
                   f"Total: {len(all_tweets):,}")
 
             # Guardar progreso tras cada página
             save_tweets(all_tweets)
 
             if not hasattr(tweets_page, 'next_cursor') or not tweets_page.next_cursor:
-                print("\n✅ No hay más páginas.")
+                print("\n✅ No more pages.")
                 break
 
             await asyncio.sleep(DELAY_BETWEEN_PAGES)
@@ -233,27 +233,27 @@ async def scrape_adam_tweets():
             page_num   += 1
 
     except Exception as e:
-        print(f"\n❌ Error durante la descarga: {e}")
-        print("💾 Guardando progreso actual...")
+        print(f"\n❌ Error during download: {e}")
+        print("💾 Saving current progress...")
         save_tweets(all_tweets)
 
     # ── Resumen ───────────────────────────────────────────────────────────
     save_tweets(all_tweets)
 
     print("\n" + "=" * 55)
-    print(f"✅ Scraping completado")
-    print(f"📊 Total tweets guardados: {len(all_tweets):,}")
-    print(f"🆕 Nuevos en esta sesión:  {new_count:,}")
+    print(f"✅ Scraping complete")
+    print(f"📊 Total tweets saved: {len(all_tweets):,}")
+    print(f"🆕 New this session:   {new_count:,}")
 
     if all_tweets:
         dates = sorted([t['created_at'][:10] for t in all_tweets if t.get('created_at')])
         if dates:
-            print(f"📅 Más antiguo:  {dates[0]}")
-            print(f"📅 Más reciente: {dates[-1]}")
+            print(f"📅 Oldest: {dates[0]}")
+            print(f"📅 Newest: {dates[-1]}")
 
     originals = sum(1 for t in all_tweets if not t.get('is_retweet'))
-    print(f"📝 Tweets originales: {originals:,}")
-    print(f"📁 Archivo: {OUTPUT_FILE}")
+    print(f"📝 Original tweets: {originals:,}")
+    print(f"📁 File: {OUTPUT_FILE}")
     print("=" * 55)
 
 

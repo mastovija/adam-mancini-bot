@@ -89,7 +89,7 @@ def get_latest_article() -> dict | None:
             'is_free':      a.get('audience') == 'everyone',
         }
     except Exception as e:
-        print(f"❌ Error consultando Substack: {e}")
+        print(f"❌ Error querying Substack: {e}")
         return None
 
 
@@ -101,9 +101,9 @@ def scrape_article_content(url: str) -> str:
     cookies = get_substack_cookies()
 
     if cookies:
-        print("   🔑 Usando cookies de suscripción (contenido completo)")
+        print("   🔑 Using subscription cookies (full content)")
     else:
-        print("   🆓 Sin cookies — solo preview público")
+        print("   🆓 No cookies — public preview only")
 
     try:
         r = requests.get(
@@ -129,7 +129,7 @@ def scrape_article_content(url: str) -> str:
 
         return ''
     except Exception as e:
-        print(f"  ⚠️  Error descargando: {e}")
+        print(f"  ⚠️  Error downloading: {e}")
         return ''
 
 
@@ -202,7 +202,7 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
     5. Guarda en data/daily/today.json con content_plan completo
     """
     print("=" * 55)
-    print("  Bot Adam Mancini — Newsletter Parser")
+    print("  Adam Mancini Bot — Newsletter Parser")
     print("=" * 55)
 
     hoy = str(date.today())
@@ -211,29 +211,29 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
         with open(TODAY_FILE) as f:
             existing = json.load(f)
         if existing.get('date') == hoy:
-            print(f"✅ Newsletter de hoy ({hoy}) ya procesado.")
+            print(f"✅ Today's newsletter ({hoy}) already processed.")
             _mostrar_resumen(existing)
             return existing
 
-    print(f"🔍 Consultando Substack para {hoy}...")
+    print(f"🔍 Querying Substack for {hoy}...")
     article = get_latest_article()
 
     if not article:
-        print("❌ No se pudo conectar a Substack")
+        print("❌ Could not connect to Substack")
         return None
 
-    print(f"📰 Artículo: [{article['published_at']}] {article['title'][:60]}")
+    print(f"📰 Article: [{article['published_at']}] {article['title'][:60]}")
 
-    print("📥 Descargando contenido...")
+    print("📥 Downloading content...")
     content = scrape_article_content(article['url'])
 
     if content:
-        print(f"   ✅ {len(content):,} caracteres obtenidos")
+        print(f"   ✅ {len(content):,} characters fetched")
     else:
-        print("   ⚠️  Sin contenido — usando título")
+        print("   ⚠️  No content — using title")
         content = f"{article['title']}\n{article.get('subtitle', '')}"
 
-    print("🤖 Extrayendo mapa del día con Claude Haiku...")
+    print("🤖 Extracting day map with Claude Haiku...")
 
     try:
         trading_info = extract_trading_info({
@@ -244,16 +244,16 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
         soportes     = trading_info.get('soportes', [])
         resistencias = trading_info.get('resistencias', [])
         print(f"   ✅ Bias: {trading_info.get('bias')} | "
-              f"Crítico: {trading_info.get('nivel_critico')} | "
-              f"Soportes: {len(soportes)} | "
-              f"Resistencias: {len(resistencias)}")
+              f"Critical: {trading_info.get('nivel_critico')} | "
+              f"Supports: {len(soportes)} | "
+              f"Resistances: {len(resistencias)}")
     except Exception as e:
-        print(f"   ❌ Error LLM: {e}")
+        print(f"   ❌ LLM error: {e}")
         trading_info = {}
 
     mapa = guardar_mapa_dia(article, trading_info, content)
-    print(f"\n💾 Guardado en: {TODAY_FILE}")
-    print(f"   content_plan: {len(mapa.get('content_plan', ''))} chars (Trade Plan completo)")
+    print(f"\n💾 Saved to: {TODAY_FILE}")
+    print(f"   content_plan: {len(mapa.get('content_plan', ''))} chars (full Trade Plan)")
     _mostrar_resumen(mapa)
     return mapa
 
@@ -261,18 +261,18 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
 def _mostrar_resumen(mapa: dict):
     """Muestra el mapa del día de forma legible en consola."""
     print()
-    print("┌─ MAPA DEL DÍA " + "─" * 38)
-    print(f"│ Fecha:         {mapa.get('date', '?')}")
+    print("┌─ DAY MAP " + "─" * 43)
+    print(f"│ Date:          {mapa.get('date', '?')}")
     print(f"│ Bias:          {mapa.get('bias', '?').upper()}")
-    print(f"│ Completo:      {'✅ Sí' if mapa.get('is_complete') else '⚠️  Solo preview'}")
-    print(f"│ Plan completo: {'✅ Sí' if mapa.get('content_plan') else '❌ No'} "
+    print(f"│ Complete:      {'✅ Yes' if mapa.get('is_complete') else '⚠️  Preview only'}")
+    print(f"│ Full plan:     {'✅ Yes' if mapa.get('content_plan') else '❌ No'} "
           f"({len(mapa.get('content_plan', ''))} chars)")
 
     if mapa.get('nivel_critico'):
-        print(f"│ Nivel crítico: {mapa['nivel_critico']}")
+        print(f"│ Critical level: {mapa['nivel_critico']}")
 
     if mapa.get('soportes'):
-        print(f"│ Soportes ({len(mapa['soportes'])}):  {mapa['soportes']}")
+        print(f"│ Supports ({len(mapa['soportes'])}):  {mapa['soportes']}")
 
     if mapa.get('resistencias'):
         print(f"│ Resists ({len(mapa['resistencias'])}):   {mapa['resistencias'][:8]}...")
@@ -286,7 +286,7 @@ def _mostrar_resumen(mapa: dict):
                 print(f"│   {linea}.")
 
     if mapa.get('invalida_si'):
-        print(f"│ Invalida si:   {mapa['invalida_si']}")
+        print(f"│ Invalidated if: {mapa['invalida_si']}")
 
     print("└" + "─" * 53)
     print()

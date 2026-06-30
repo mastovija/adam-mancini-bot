@@ -107,25 +107,25 @@ def add_tweets_to_kb():
     3. Añade a ChromaDB con metadatos para filtrado
     """
     print("=" * 55)
-    print("  Bot Adam Mancini — Añadiendo Tweets a ChromaDB")
+    print("  Adam Mancini Bot — Adding Tweets to ChromaDB")
     print("=" * 55)
 
     # ── Cargar tweets ─────────────────────────────────────────────────────
     tweets_file = TWEETS_DIR / 'adam_mancini_tweets.json'
     if not tweets_file.exists():
-        print("❌ No se encontraron tweets.")
-        print(f"   Ejecuta primero: python scrapers/twitter_scraper_playwright.py")
+        print("❌ No tweets found.")
+        print(f"   Run first: python scrapers/twitter_scraper_playwright.py")
         return
 
     with open(tweets_file, 'r', encoding='utf-8') as f:
         todos_tweets = json.load(f)
 
-    print(f"📊 Tweets cargados: {len(todos_tweets)}")
+    print(f"📊 Tweets loaded: {len(todos_tweets)}")
 
     # ── Inicializar ChromaDB ──────────────────────────────────────────────
-    print("📚 Conectando a ChromaDB...")
+    print("📚 Connecting to ChromaDB...")
     collection = get_collection()
-    print(f"   Documentos actuales: {collection.count()}")
+    print(f"   Current documents: {collection.count()}")
 
     # ── Obtener IDs ya indexados ──────────────────────────────────────────
     # Evitar duplicados si corremos el script varias veces
@@ -137,7 +137,7 @@ def add_tweets_to_kb():
         pass
 
     # ── Procesar e indexar tweets ─────────────────────────────────────────
-    print("\n📥 Indexando tweets relevantes...")
+    print("\n📥 Indexing relevant tweets...")
     print("-" * 40)
 
     indexados  = 0
@@ -194,22 +194,22 @@ def add_tweets_to_kb():
             indexados += 1
 
             if indexados <= 5 or indexados % 50 == 0:
-                print(f"  [{indexados}] {fecha[:10]} — {bias:8s} | niveles: {niveles[:3]} | {texto[:60]}...")
+                print(f"  [{indexados}] {fecha[:10]} — {bias:8s} | levels: {niveles[:3]} | {texto[:60]}...")
 
         except Exception as e:
             print(f"  ❌ Error: {e}")
 
     # ── Resumen ───────────────────────────────────────────────────────────
     print("\n" + "=" * 55)
-    print(f"✅ Tweets indexados:  {indexados}")
-    print(f"🔕 Filtrados (sin niveles): {filtrados}")
-    print(f"⏭️  Duplicados saltados: {duplicados}")
-    print(f"📚 Total en ChromaDB: {collection.count()}")
+    print(f"✅ Tweets indexed:  {indexados}")
+    print(f"🔕 Filtered (no levels): {filtrados}")
+    print(f"⏭️  Duplicates skipped: {duplicados}")
+    print(f"📚 Total in ChromaDB: {collection.count()}")
     print("=" * 55)
     print()
-    print("La base de conocimiento ahora incluye:")
-    print("  • Newsletter: ~1403 artículos (2021-2026)")
-    print(f"  • Tweets: {indexados} tweets con niveles de precio")
+    print("The knowledge base now includes:")
+    print("  • Newsletter: ~1403 articles (2021-2026)")
+    print(f"  • Tweets: {indexados} tweets with price levels")
 
 
 if __name__ == '__main__':

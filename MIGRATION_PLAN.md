@@ -63,20 +63,24 @@ Strings sent to the user's phone via `bot.send_message(...)` / `alerter.send(...
 
 ---
 
-## TIER 3 — Console / log output  🟡
+## TIER 3 — Console / log output  🟡 — ✅ COMPLETE
 
 Operator-facing `print(...)` / `logging` strings. Listed by print/log line weight.
 
-- [ ] **`backtest/backtester.py`** — *~124 Spanish lines* (print/log ~22, strings ~27, comments/docstrings ~56, other ~19) — heaviest non-prompt file
-- [ ] **`scrapers/substack_scraper.py`** — *~64 lines* (print/log ~11, comments/docstrings ~49)
-- [ ] **`scrapers/twitter_scraper.py`** — *~32 lines* (print/log ~11, comments/docstrings ~20)
-- [ ] **`market_data/ibkr_feed.py`** — *~73 lines* (print/log ~10, docstrings/comments ~51, other ~8)
-- [ ] **`parsers/newsletter_parser.py`** — *~46 lines* (print/log ~9, docstrings/comments ~34)
-- [ ] **`backtest/download_data.py`** — *~30 lines* (print/log ~8, comments/docstrings ~21)
-- [ ] **`knowledge_base/build_kb.py`** — *~35 lines* (print/log ~8, comments/docstrings ~24)
-- [ ] **`knowledge_base/add_tweets_to_kb.py`** — *~38 lines* (print/log ~5, comments/docstrings ~26, strings ~6)
-- [ ] **`market_data/alpaca_feed.py`** — *~38 lines* (print/log ~5, docstrings/comments ~26, strings ~5)
-- [ ] **`scrapers/twitter_scraper_playwright.py`** — *~31 lines* (print/log ~4, comments/docstrings ~22)
+**All operator-facing `print()` strings across these 10 files are now English.** Scope was strictly the natural-language text passed to `print()` — internal dict/variable keys (`señales`, `por_descargar`, `descargados`, `dias_con_nl`, the `RANGO_NIVELES`/`MIN_FLUSH_PTS` constant labels…), f-string interpolations, emoji, separators, and ChromaDB document/metadata content (`add_tweets_to_kb.py` `doc_texto`) were left untouched. Code comments and docstrings remain Spanish (Tier 4 — handled per-file in a later pass). All 10 files pass `py_compile`.
+
+*Behavioral note:* in `backtester.py` `print_edge_report`, the group labels `"CON Failed Breakdown"`/`"SIN Failed Breakdown (referencia)"` became `"WITH …"`/`"WITHOUT …"`; the downstream discriminator `if 'CON' in nombre` was rewritten to `if nombre.startswith('WITH ')` (a bare `'WITH' in nombre` would have matched `"WITHOUT"`), preserving the original flush-stats logic.
+
+- [x] **`backtest/backtester.py`** ✅ print/log strings translated (edge report, backtest report, top-levels/last-signals tables, status messages) — heaviest non-prompt file
+- [x] **`scrapers/substack_scraper.py`** ✅ print/log strings translated (article listing, download progress, final summary, cookie tips)
+- [x] **`scrapers/twitter_scraper.py`** ✅ print/log strings translated (cookie loading/errors, pagination, summary)
+- [x] **`market_data/ibkr_feed.py`** ✅ print/log strings translated (connect/disconnect, data-mode, snapshot/bars, `_test_feed`)
+- [x] **`parsers/newsletter_parser.py`** ✅ print/log strings translated (fetch/parse flow, `_mostrar_resumen` DAY MAP box)
+- [x] **`backtest/download_data.py`** ✅ print/log strings translated (period/download progress, final summary)
+- [x] **`knowledge_base/build_kb.py`** ✅ print/log strings translated (init, progress, summary, `_print_stats`)
+- [x] **`knowledge_base/add_tweets_to_kb.py`** ✅ print/log strings translated (load/index/summary). *ChromaDB `doc_texto`/`metadata` content left as data — not console output.*
+- [x] **`market_data/alpaca_feed.py`** ✅ print/log strings translated (feed errors, polling loop, `test_feed`)
+- [x] **`scrapers/twitter_scraper_playwright.py`** ✅ print/log strings translated (scroll progress, batch errors, summary)
 
 ---
 

@@ -66,43 +66,43 @@ def build_knowledge_base():
     3. Guarda progreso cada 10 artículos (para poder reanudar)
     """
     print("=" * 60)
-    print("  Bot Adam Mancini — Fase 2: Base de Conocimiento")
+    print("  Adam Mancini Bot — Phase 2: Knowledge Base")
     print("=" * 60)
 
     # ── Inicializar ChromaDB ──────────────────────────────────────────────
-    print("\n📚 Inicializando ChromaDB...")
-    print("   (La primera vez descarga el modelo de embeddings ~80MB)")
+    print("\n📚 Initializing ChromaDB...")
+    print("   (First run downloads the embeddings model ~80MB)")
     collection = get_collection()
-    print(f"   ✅ Colección lista. Documentos actuales: {collection.count()}")
+    print(f"   ✅ Collection ready. Current documents: {collection.count()}")
 
     # ── Cargar artículos disponibles ──────────────────────────────────────
     article_files = sorted([
         f for f in NEWSLETTER_DIR.glob('*.json')
         if f.stem != 'index'
     ])
-    print(f"\n📰 Artículos en newsletter/: {len(article_files)}")
+    print(f"\n📰 Articles in newsletter/: {len(article_files)}")
 
     # ── Filtrar ya procesados ─────────────────────────────────────────────
     processed = load_progress()
     to_process = [f for f in article_files if f.stem not in processed]
 
-    print(f"✅ Ya procesados: {len(processed)}")
-    print(f"🆕 Por procesar:  {len(to_process)}")
+    print(f"✅ Already processed: {len(processed)}")
+    print(f"🆕 To process:  {len(to_process)}")
 
     if not to_process:
-        print("\n🎉 Todo ya está indexado. La base de conocimiento está completa.")
+        print("\n🎉 Everything already indexed. The knowledge base is complete.")
         _print_stats(collection)
         return
 
     # ── Estimar coste y tiempo ────────────────────────────────────────────
     est_minutes = len(to_process) * 1.5 / 60
     est_cost    = len(to_process) * 0.00008  # ~$0.00008 por artículo con Haiku
-    print(f"\n⏱️  Tiempo estimado: ~{est_minutes:.0f} minutos")
-    print(f"💰 Coste estimado:  ~${est_cost:.2f}")
+    print(f"\n⏱️  Estimated time: ~{est_minutes:.0f} minutes")
+    print(f"💰 Estimated cost:  ~${est_cost:.2f}")
     print()
 
     # ── Procesamiento ─────────────────────────────────────────────────────
-    print("🤖 Procesando artículos con Claude Haiku...")
+    print("🤖 Processing articles with Claude Haiku...")
     print("-" * 60)
 
     ok     = 0
@@ -150,7 +150,7 @@ def build_knowledge_base():
             bias = trading_info.get('bias', '?')
             sop  = trading_info.get('soportes', [])
             res  = trading_info.get('resistencias', [])
-            print(f"       → {bias} | soportes: {sop} | resistencias: {res}")
+            print(f"       → {bias} | supports: {sop} | resistances: {res}")
 
         except Exception as e:
             errors += 1
@@ -160,7 +160,7 @@ def build_knowledge_base():
         # ── Guardar progreso cada 10 artículos ────────────────────────────
         if i % 10 == 0:
             save_progress(processed)
-            print(f"\n  💾 Progreso guardado ({len(processed)} procesados)\n")
+            print(f"\n  💾 Progress saved ({len(processed)} processed)\n")
 
         # Pequeña pausa para no saturar la API
         time.sleep(0.5)
@@ -170,25 +170,25 @@ def build_knowledge_base():
 
     # ── Resumen ───────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
-    print(f"✅ Procesamiento completado")
-    print(f"   Indexados:  {ok}")
-    print(f"   Saltados:   {skipped} (contenido insuficiente)")
-    print(f"   Errores:    {errors}")
+    print(f"✅ Processing complete")
+    print(f"   Indexed:  {ok}")
+    print(f"   Skipped:  {skipped} (insufficient content)")
+    print(f"   Errors:   {errors}")
     _print_stats(collection)
     print("=" * 60)
     print()
-    print("💡 Próximo paso: Fase 3 — Parser diario del newsletter")
+    print("💡 Next step: Phase 3 — Daily newsletter parser")
 
 
 def _print_stats(collection):
     """Imprime estadísticas de la colección."""
     try:
         stats = get_stats(collection)
-        print(f"\n📊 Estado de la base de conocimiento:")
-        print(f"   Total documentos: {stats['total_documentos']}")
-        print(f"   Distribución bias: {stats['distribucion_bias']}")
+        print(f"\n📊 Knowledge base status:")
+        print(f"   Total documents: {stats['total_documentos']}")
+        print(f"   Bias distribution: {stats['distribucion_bias']}")
     except Exception:
-        print(f"\n📊 Total documentos en ChromaDB: {collection.count()}")
+        print(f"\n📊 Total documents in ChromaDB: {collection.count()}")
 
 
 # ─────────────────────────────────────────────

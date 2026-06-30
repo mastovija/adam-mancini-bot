@@ -89,7 +89,7 @@ def get_all_post_metadata() -> list:
 
     Devuelve: lista de dicts con id, title, slug, date, is_free
     """
-    print("📋 Obteniendo listado completo de artículos...")
+    print("📋 Fetching full list of articles...")
 
     all_posts = []
     offset    = 0
@@ -104,7 +104,7 @@ def get_all_post_metadata() -> list:
             response.raise_for_status()
             batch = response.json()
         except requests.exceptions.RequestException as e:
-            print(f"  ❌ Error en API: {e}")
+            print(f"  ❌ API error: {e}")
             break
 
         if not batch:
@@ -124,7 +124,7 @@ def get_all_post_metadata() -> list:
                 'url':          f"{SUBSTACK_URL}/p/{post.get('slug', '')}",
             })
 
-        print(f"  Encontrados: {len(all_posts)} artículos...")
+        print(f"  Found: {len(all_posts)} articles...")
 
         # Si la respuesta tiene menos del tamaño de página, ya no hay más
         if len(batch) < BATCH_SIZE:
@@ -133,7 +133,7 @@ def get_all_post_metadata() -> list:
         offset += BATCH_SIZE
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
-    print(f"✅ Total artículos encontrados: {len(all_posts)}\n")
+    print(f"✅ Total articles found: {len(all_posts)}\n")
     return all_posts
 
 
@@ -226,10 +226,10 @@ def scrape_newsletter():
     5. Cada artículo = un archivo JSON individual (slug.json)
     """
     print("=" * 55)
-    print("  Bot Adam Mancini — Scraper de Newsletter")
+    print("  Adam Mancini Bot — Newsletter Scraper")
     print("=" * 55)
     print(f"🌐 URL: {SUBSTACK_URL}")
-    print(f"📁 Guardando en: {NEWSLETTER_DIR}\n")
+    print(f"📁 Saving to: {NEWSLETTER_DIR}\n")
 
     # Crear directorio
     NEWSLETTER_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ def scrape_newsletter():
     # ── 1. Obtener listado completo ───────────────────────────────────────
     all_posts = get_all_post_metadata()
     if not all_posts:
-        print("❌ No se encontraron artículos. ¿Está bien la URL en config.py?")
+        print("❌ No articles found. Is the URL in config.py correct?")
         return
 
     # ── 2. Guardar índice ─────────────────────────────────────────────────
@@ -245,13 +245,13 @@ def scrape_newsletter():
     index_file = NEWSLETTER_DIR / 'index.json'
     with open(index_file, 'w', encoding='utf-8') as f:
         json.dump(all_posts, f, indent=2, ensure_ascii=False)
-    print(f"📑 Índice guardado: {index_file}")
+    print(f"📑 Index saved: {index_file}")
 
     # ── 3. Estadísticas ───────────────────────────────────────────────────
     free_posts  = [p for p in all_posts if p['is_free']]
     paid_posts  = [p for p in all_posts if not p['is_free']]
-    print(f"📊 Artículos gratuitos: {len(free_posts)}")
-    print(f"🔒 Artículos de pago:   {len(paid_posts)}\n")
+    print(f"📊 Free articles: {len(free_posts)}")
+    print(f"🔒 Paid articles: {len(paid_posts)}\n")
 
     # ── 4. Filtrar los ya descargados ─────────────────────────────────────
     # Leemos los slugs de los JSON ya existentes para no repetir trabajo
@@ -284,18 +284,18 @@ def scrape_newsletter():
 
     if has_paid_access():
         est_min = (len(to_download_paid) * DELAY_BETWEEN_REQUESTS) / 60
-        print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
-              f"{len(to_download_paid)} de pago (contenido completo con cookies)")
-        print(f"⏱️  Tiempo estimado: ~{est_min:.0f} minutos")
+        print(f"🆕 To download: {len(to_download_free)} free, "
+              f"{len(to_download_paid)} paid (full content with cookies)")
+        print(f"⏱️  Estimated time: ~{est_min:.0f} minutes")
     else:
-        print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
-              f"{len(to_download_paid)} de pago (solo metadatos/preview)")
+        print(f"🆕 To download: {len(to_download_free)} free, "
+              f"{len(to_download_paid)} paid (metadata/preview only)")
 
-    print(f"🆕 Por descargar: {len(to_download_free)} gratuitos, "
-          f"{len(to_download_paid)} de pago (solo metadatos)")
+    print(f"🆕 To download: {len(to_download_free)} free, "
+          f"{len(to_download_paid)} paid (metadata only)")
 
     # ── 5. Descargar artículos gratuitos con contenido ────────────────────
-    print("\n📥 Descargando artículos gratuitos...")
+    print("\n📥 Downloading free articles...")
     print("-" * 40)
 
     downloaded_ok  = 0
@@ -316,18 +316,18 @@ def scrape_newsletter():
         # Informar resultado
         if article['scrape_status'] == 'ok':
             downloaded_ok += 1
-            status = "✅ completo" if article.get('is_complete') else "⚠️  parcial"
+            status = "✅ complete" if article.get('is_complete') else "⚠️  partial"
             print(f"       → {status} ({article['content_length']:,} chars)")
         else:
             downloaded_err += 1
-            print(f"       → ❌ Error: {article.get('error', 'desconocido')}")
+            print(f"       → ❌ Error: {article.get('error', 'unknown')}")
 
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
     # ── 6. Guardar metadatos de artículos de pago ─────────────────────────
     # Aunque no tenemos el contenido, guardamos los metadatos para saber qué existe
     if to_download_paid:
-        print(f"\n📥 Descargando preview de {len(to_download_paid)} artículos de pago...")
+        print(f"\n📥 Downloading preview of {len(to_download_paid)} paid articles...")
         print("-" * 40)
         for i, post in enumerate(to_download_paid, 1):
             date_str  = post['published_at']
@@ -344,17 +344,17 @@ def scrape_newsletter():
 
     # ── Resumen final ─────────────────────────────────────────────────────
     print("\n" + "=" * 55)
-    print(f"✅ Scraping completado")
-    print(f"📥 Descargados con contenido: {downloaded_ok}")
-    print(f"❌ Errores:                   {downloaded_err}")
-    print(f"🔒 Sin contenido (de pago):   {len(to_download_paid)}")
-    print(f"📁 Directorio: {NEWSLETTER_DIR}")
+    print(f"✅ Scraping complete")
+    print(f"📥 Downloaded with content: {downloaded_ok}")
+    print(f"❌ Errors:                  {downloaded_err}")
+    print(f"🔒 Without content (paid):  {len(to_download_paid)}")
+    print(f"📁 Directory: {NEWSLETTER_DIR}")
     print("=" * 55)
     print()
-    print("💡 Para descargar los artículos de pago en el futuro:")
-    print("   1. Suscríbete al newsletter en tradecompanion.substack.com")
-    print("   2. Abre Chrome → F12 → Application → Cookies → substack.com")
-    print("   3. Copia las cookies y ponlas en SUBSTACK_COOKIES en tu .env")
+    print("💡 To download paid articles in the future:")
+    print("   1. Subscribe to the newsletter at tradecompanion.substack.com")
+    print("   2. Open Chrome → F12 → Application → Cookies → substack.com")
+    print("   3. Copy the cookies into SUBSTACK_COOKIES in your .env")
 
 
 # ─────────────────────────────────────────────

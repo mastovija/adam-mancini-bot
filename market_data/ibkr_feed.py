@@ -60,8 +60,8 @@ from config import (
 try:
     from ib_insync import IB, Future, util
 except ImportError:
-    print("❌ ib_insync no instalado.")
-    print("   Ejecuta: pip install ib_insync")
+    print("❌ ib_insync not installed.")
+    print("   Run: pip install ib_insync")
     sys.exit(1)
 
 
@@ -126,8 +126,8 @@ class ESFeed:
         if self._connected:
             return
 
-        print(f"\n🔌 Conectando a IB Gateway ({IBKR_HOST}:{IBKR_PORT}, clientId={IBKR_CLIENT_ID})...")
-        print("   (IB Gateway debe estar corriendo en modo paper trading)")
+        print(f"\n🔌 Connecting to IB Gateway ({IBKR_HOST}:{IBKR_PORT}, clientId={IBKR_CLIENT_ID})...")
+        print("   (IB Gateway must be running in paper trading mode)")
 
         try:
             await self.ib.connectAsync(
@@ -137,16 +137,16 @@ class ESFeed:
                 timeout=15,
             )
         except Exception as e:
-            print(f"\n❌ No se pudo conectar a IB Gateway: {e}")
-            print(f"   1. IB Gateway corriendo en tu Mac (paper trading)")
-            print(f"   2. API habilitada, puerto {IBKR_PORT}")
+            print(f"\n❌ Could not connect to IB Gateway: {e}")
+            print(f"   1. IB Gateway running on your Mac (paper trading)")
+            print(f"   2. API enabled, port {IBKR_PORT}")
             raise
 
         # Tipo 3 = DELAYED (~15 min de retraso, gratuito con cuenta paper)
         # Sin esto → error 354 "Requested market data is not subscribed"
         # Tipo 1 = LIVE (requiere suscripción de pago en IBKR)
         self.ib.reqMarketDataType(3)
-        print("   📡 Modo de datos: DELAYED (15 min) — suficiente para señales")
+        print("   📡 Data mode: DELAYED (15 min) — enough for signals")
 
         # Calificar el contrato: IBKR completa los detalles (conId, localSymbol, etc.)
         contrato_raw = Future(
@@ -164,8 +164,8 @@ class ESFeed:
             )
 
         self._contract = contratos[0]
-        print(f"   ✅ Contrato calificado: {self._contract.localSymbol} "
-              f"(expira {self._contract.lastTradeDateOrContractMonth})")
+        print(f"   ✅ Qualified contract: {self._contract.localSymbol} "
+              f"(expires {self._contract.lastTradeDateOrContractMonth})")
 
         # Suscribir a stream de ticks en tiempo real (delayed con tipo 3)
         # El ticker se actualiza automáticamente cuando llegan nuevos ticks
@@ -176,18 +176,18 @@ class ESFeed:
             regulatorySnapshot=False,
         )
 
-        print("   ⏳ Esperando primeros ticks...")
+        print("   ⏳ Waiting for first ticks...")
         await asyncio.sleep(3)
 
         self._connected = True
 
         precio = self._get_current_price()
         if precio:
-            print(f"   📊 Precio ES: {precio:.2f} (delayed ~15 min)")
+            print(f"   📊 ES price: {precio:.2f} (delayed ~15 min)")
         else:
-            print("   ⚠️  Sin precio aún — normal si el mercado está cerrado")
+            print("   ⚠️  No price yet — normal if the market is closed")
 
-        print(f"   ✅ Feed IBKR activo — {self._contract.localSymbol}\n")
+        print(f"   ✅ IBKR feed active — {self._contract.localSymbol}\n")
 
     def disconnect(self):
         """Desconecta limpiamente de IB Gateway."""
@@ -199,12 +199,12 @@ class ESFeed:
                 pass
             self.ib.disconnect()
             self._connected = False
-            print("🔌 IBKR desconectado correctamente")
+            print("🔌 IBKR disconnected cleanly")
 
     def _ensure_connected(self) -> bool:
         """Verifica que la conexión sigue activa."""
         if not self._connected or not self.ib.isConnected():
-            print("  ⚠️  IBKR desconectado")
+            print("  ⚠️  IBKR disconnected")
             self._connected = False
             return False
         return True
@@ -249,14 +249,14 @@ class ESFeed:
 
         precio_es = self._get_current_price()
         if not precio_es:
-            print("  ⚠️  Sin precio ES en el stream IBKR")
+            print("  ⚠️  No ES price in the IBKR stream")
             return None
 
         # Guardia: más de 10 min sin actualización → posible desconexión silenciosa
         if self._last_update:
             edad_seg = (datetime.now() - self._last_update).total_seconds()
             if edad_seg > 600:
-                print(f"  ⚠️  Último tick hace {int(edad_seg/60)} min")
+                print(f"  ⚠️  Last tick {int(edad_seg/60)} min ago")
                 return None
 
         return {
@@ -352,7 +352,7 @@ class ESFeed:
             return bars[-n:]  # últimas N, de más antigua a más reciente
 
         except Exception as e:
-            print(f"  ⚠️  Error obteniendo barras IBKR {timeframe_minutes}min: {e}")
+            print(f"  ⚠️  Error fetching IBKR {timeframe_minutes}min bars: {e}")
             return []
 
     def spy_to_es(self, price: float) -> float:
@@ -370,27 +370,27 @@ async def _test_feed():
     Ejecutar con: python market_data/ibkr_feed.py
     """
     print("=" * 60)
-    print("  Test Feed IBKR — ES Futures")
+    print("  IBKR Feed Test — ES Futures")
     print("=" * 60)
-    print(f"⏰ Mercado (ventana Adam): {'🟢 ABIERTO' if is_market_open() else '🔴 CERRADO'}")
-    print(f"📋 Contrato objetivo: ES {IBKR_ES_EXPIRY}")
+    print(f"⏰ Market (Adam window): {'🟢 OPEN' if is_market_open() else '🔴 CLOSED'}")
+    print(f"📋 Target contract: ES {IBKR_ES_EXPIRY}")
 
     feed = ESFeed()
 
     try:
         await feed.connect_async()
 
-        print("\n📊 Obteniendo snapshot actual...")
+        print("\n📊 Fetching current snapshot...")
         snapshot = feed.get_snapshot()  # síncrono
 
         if snapshot:
             print(f"\n✅ Snapshot OK:")
-            print(f"   ES price:    {snapshot['es_equivalent']:.2f} puntos")
+            print(f"   ES price:    {snapshot['es_equivalent']:.2f} points")
             print(f"   Timestamp:   {snapshot['timestamp'][:19]}")
         else:
-            print("⚠️  Sin snapshot (mercado cerrado o sin ticks recientes)")
+            print("⚠️  No snapshot (market closed or no recent ticks)")
 
-        print(f"\n📈 Últimas 5 barras de 15 minutos (pre-market incluido):")
+        print(f"\n📈 Last 5 15-minute bars (pre-market included):")
         bars = await feed.get_bars(15, 5)
         if bars:
             for b in bars:
@@ -399,22 +399,22 @@ async def _test_feed():
                       f"L:{b['low']:.2f}  C:{b['close']:.2f}  "
                       f"Vol:{b['volume']:,}")
         else:
-            print("   (Sin barras)")
+            print("   (No bars)")
 
-        print(f"\n📈 Últimas 3 barras de 1 minuto:")
+        print(f"\n📈 Last 3 1-minute bars:")
         bars_1m = await feed.get_bars(1, 3)
         if bars_1m:
             for b in bars_1m:
                 print(f"   {b['timestamp']} | C:{b['close']:.2f}")
         else:
-            print("   (Sin barras de 1 minuto)")
+            print("   (No 1-minute bars)")
 
     except Exception as e:
         print(f"\n❌ Error: {e}")
     finally:
         feed.disconnect()
 
-    print("\n✅ Test completado")
+    print("\n✅ Test complete")
 
 
 if __name__ == '__main__':
