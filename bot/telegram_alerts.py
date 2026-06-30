@@ -221,14 +221,14 @@ class TelegramAlerter:
         Envía alerta cuando Adam publica un tweet accionable.
         Incluye el texto original + los niveles extraídos.
         """
-        tipo    = clasificacion.get('tipo', 'comentario')
+        tipo    = clasificacion.get('tipo', 'comment')
         accion  = clasificacion.get('accionable', False)
 
-        tipo_emo = {'senal': '⚡', 'nivel': '📍', 'comentario': '💬'}.get(tipo, '🐦')
+        tipo_emo = {'signal': '⚡', 'level': '📍', 'comment': '💬'}.get(tipo, '🐦')
         tipo_txt = {
-            'senal':      'SEÑAL ACCIONABLE',
-            'nivel':      'ACTUALIZACIÓN NIVELES',
-            'comentario': 'COMENTARIO',
+            'signal':  'SEÑAL ACCIONABLE',
+            'level':   'ACTUALIZACIÓN NIVELES',
+            'comment': 'COMENTARIO',
         }.get(tipo, tipo.upper())
 
         texto   = html.escape(tweet.get('text') or '')
@@ -406,7 +406,7 @@ async def main():
         'created_at': '2026-06-10T14:32:00+00:00',
     }
     clasif_ejemplo = {
-        'tipo':       'senal',
+        'tipo':       'signal',
         'accionable': True,
         'direccion':  'long',
         'entrada':    7308,

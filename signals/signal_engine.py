@@ -16,6 +16,7 @@ MEJORAS AÑADIDAS (junio 2026):
 
 import asyncio
 import json
+import textwrap  # para imprimir la razón completa del LLM en varias líneas
 # import re  ← eliminado C-14: los regex del JSON se reemplazaron por str.find/rfind
 import sys
 from datetime import datetime, timedelta
@@ -101,14 +102,14 @@ def get_all_levels(today: dict) -> list:
     niveles = []
     for n in today.get('soportes', []):
         if n:
-            niveles.append({'nivel': float(n), 'tipo': 'soporte'})
+            niveles.append({'nivel': float(n), 'tipo': 'support'})
     for n in today.get('resistencias', []):
         if n:
-            niveles.append({'nivel': float(n), 'tipo': 'resistencia'})
+            niveles.append({'nivel': float(n), 'tipo': 'resistance'})
     if today.get('nivel_critico'):
         nc = float(today['nivel_critico'])
         if not any(abs(x['nivel'] - nc) < 0.5 for x in niveles):
-            niveles.append({'nivel': nc, 'tipo': 'pivote'})
+            niveles.append({'nivel': nc, 'tipo': 'pivot'})
 
     # Deduplicar por valor redondeado al entero más cercano.
     # round(7425.0) == round(7425.3) == 7425 → se queda la primera entrada.
@@ -153,47 +154,47 @@ def get_trading_window() -> tuple:
     hora_dec = ahora.hour + ahora.minute / 60.0
 
     if 7.5 <= hora_dec < 11.0:
-        ventana  = "🟢 VENTANA PRINCIPAL (7:30-11:00 AM) — mayoría de entradas de Adam"
+        ventana  = "🟢 MAIN WINDOW (7:30-11:00 AM) — most of Adam's entries"
         criterio = (
-            "Estamos en la VENTANA PRINCIPAL (7:30-11:00 AM). "
-            "Criterio normal: evalúa el Failed Breakdown/Level Reclaim según el plan."
+            "We are in the MAIN WINDOW (7:30-11:00 AM). "
+            "Normal criterion: evaluate the Failed Breakdown/Level Reclaim per the plan."
         )
 
     elif 11.0 <= hora_dec < 15.0:
-        ventana  = "🟡 VENTANA CHOP (11:00 AM-3:00 PM) — listón más alto, no bloqueo"
+        ventana  = "🟡 CHOP WINDOW (11:00 AM-3:00 PM) — higher bar, no hard block"
         criterio = (
-            "Estamos en la VENTANA CHOP (11:00 AM-3:00 PM). "
-            "Adam 'raramente' opera aquí — pero NO es 'nunca'. "
+            "We are in the CHOP WINDOW (11:00 AM-3:00 PM). "
+            "Adam 'rarely' trades here — but it is NOT 'never'. "
             # B-7: eliminado ejemplo con fecha y precios hardcodeados ('25 jun', 7409, 7415).
             # Un ejemplo específico en el prompt ancla al LLM hacia esos precios concretos
             # y degrada la calidad de las decisiones confórme pasan los días y el rango
             # del mercado se aleja de esos valores. La regla abstracta es suficiente.
-            "Cuando sí opera en esta ventana, siempre es con elevator down pronunciado "
-            "que flushea un mínimo significativo mayor, seguido de FB claro. "
-            "Nunca entra en chop en niveles menores, resistencias o zonas ya muy testeadas."
-            "\n\nCRITERIO ELEVADO — TODOS estos requisitos deben cumplirse:\n"
-            "  1. Elevator down CLARO y reciente (mínimo 25-30 pts en caída rápida)\n"
-            "  2. El nivel es un MÍNIMO SIGNIFICATIVO MAYOR:\n"
-            "     - Daily low del día anterior, O\n"
-            "     - Low multi-hora (20+ pts de caída que formó ese low), O\n"
-            "     - Shelf de lows de varias horas\n"
-            "     NO vale: niveles menores, resistencias, niveles 'tested to death'\n"
-            "  3. Recovery clara del nivel\n"
-            "\nSi alguno de estos tres no se cumple claramente → entrar: false."
+            "When he does trade in this window, it is always with a pronounced elevator down "
+            "that flushes a significant major low, followed by a clear FB. "
+            "He never enters chop at minor levels, resistances or already heavily tested zones."
+            "\n\nELEVATED CRITERION — ALL of these requirements must be met:\n"
+            "  1. CLEAR and recent elevator down (at least 25-30 pts in a fast drop)\n"
+            "  2. The level is a SIGNIFICANT MAJOR LOW:\n"
+            "     - Previous day's daily low, OR\n"
+            "     - Multi-hour low (20+ pt drop that formed that low), OR\n"
+            "     - Shelf of lows over several hours\n"
+            "     Does NOT count: minor levels, resistances, 'tested to death' levels\n"
+            "  3. Clear recovery of the level\n"
+            "\nIf any one of these three is not clearly met → entrar: false."
         )
 
     elif 15.0 <= hora_dec < 16.0:
-        ventana  = "🟠 SEGUNDA VENTANA (3:00-4:00 PM) — solo si primer trade fue ganador"
+        ventana  = "🟠 SECOND WINDOW (3:00-4:00 PM) — only if the first trade was a winner"
         criterio = (
-            "Estamos en la SEGUNDA VENTANA (3:00-4:00 PM, 'after 3pm' según Adam). "
-            "Solo si el primer trade del día fue ganador. "
-            "Solo con A+ setup: elevator down limpio + FB de nivel mayor. "
-            "NO operar si Adam ya cerró plataforma o está en modo runner."
+            "We are in the SECOND WINDOW (3:00-4:00 PM, 'after 3pm' per Adam). "
+            "Only if the first trade of the day was a winner. "
+            "Only with an A+ setup: clean elevator down + FB of a major level. "
+            "Do NOT trade if Adam already closed his platform or is in runner mode."
         )
 
     else:
-        ventana  = "⚪ FUERA DE VENTANA DE TRADING"
-        criterio = "FUERA del horario de trading de Adam → entrar: false."
+        ventana  = "⚪ OUTSIDE THE TRADING WINDOW"
+        criterio = "OUTSIDE Adam's trading hours → entrar: false."
 
     return hora_str, ventana, criterio
 
@@ -277,9 +278,9 @@ def get_todays_tweets() -> list:
 
 
 def formatear_tweets_para_prompt(tweets: list) -> str:
-    """Formatea los tweets de Adam del día para el prompt del LLM."""
+    """Format Adam's tweets from today for the LLM prompt."""
     if not tweets:
-        return "No hay tweets de Adam todavía hoy."
+        return "No tweets from Adam yet today."
     lines = []
     for tweet in tweets[-12:]:
         texto = tweet.get('text', '').strip()
@@ -294,7 +295,7 @@ def formatear_tweets_para_prompt(tweets: list) -> str:
             except Exception:
                 pass
         lines.append(f"• {texto}{hora}")
-    return '\n'.join(lines) if lines else "No hay tweets de Adam todavía hoy."
+    return '\n'.join(lines) if lines else "No tweets from Adam yet today."
 
 
 # ─────────────────────────────────────────────
@@ -310,8 +311,8 @@ def is_price_at_level(precio_es: float, nivel: float, tolerancia: float = None) 
 def determinar_lado(precio_es: float, nivel_info: dict, bias: str) -> str | None:
     """Adam no va short → solo 'long' o None."""
     tipo = nivel_info['tipo']
-    if tipo in ('soporte', 'resistencia', 'pivote'):
-        if tipo == 'pivote' and precio_es < nivel_info['nivel']:
+    if tipo in ('support', 'resistance', 'pivot'):
+        if tipo == 'pivot' and precio_es < nivel_info['nivel']:
             return None
         return 'long' if bias != 'bearish' else None
     return None
@@ -355,7 +356,7 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
     """
     if not bars_15 or len(bars_15) < 2:
         return {'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
-                'descripcion': 'Sin datos de velas suficientes'}
+                'descripcion': 'Not enough candle data'}
 
     m                = SPY_TO_ES_MULTIPLIER
     precio_actual_es = bars_15[-1]['close'] * m
@@ -363,8 +364,8 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
     # Si el precio sigue por debajo del nivel, la recovery no ha ocurrido aún
     if precio_actual_es <= nivel:
         return {'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
-                'descripcion': (f'Precio {precio_actual_es:.0f} por debajo de '
-                                f'{nivel:.0f} — recovery aún no completada')}
+                'descripcion': (f'Price {precio_actual_es:.0f} below '
+                                f'{nivel:.0f} — recovery not completed yet')}
 
     # ── CHECK 1: FB intra-barra ───────────────────────────────────────────
     barra_actual    = bars_15[-1]
@@ -379,9 +380,9 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
         if precio_estaba_encima:
             flush_size = round(nivel - low_actual_es, 1)
             if flush_size >= 20:
-                calidad = f'profundo ({flush_size:.0f} pts) — alta probabilidad institucional'
+                calidad = f'deep ({flush_size:.0f} pts) — high institutional probability'
             elif flush_size >= 10:
-                calidad = f'moderado ({flush_size:.0f} pts)'
+                calidad = f'moderate ({flush_size:.0f} pts)'
             else:
                 calidad = f'shallow ({flush_size:.0f} pts)'
             return {
@@ -389,9 +390,9 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
                 'flush_size':  flush_size,
                 'bars_ago':    1,
                 'descripcion': (
-                    f'✅ FAILED BREAKDOWN intra-barra: {calidad}, '
-                    f'flush hasta {low_actual_es:.0f} y recovery en la misma vela, '
-                    f'precio {precio_actual_es:.0f} encima de {nivel:.0f}'
+                    f'✅ INTRA-BAR FAILED BREAKDOWN: {calidad}, '
+                    f'flush down to {low_actual_es:.0f} and recovery within the same candle, '
+                    f'price {precio_actual_es:.0f} above {nivel:.0f}'
                 )
             }
 
@@ -410,9 +411,9 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
         if low_es < nivel - 5:
             flush_size = round(nivel - low_es, 1)
             if flush_size >= 20:
-                calidad = f'profundo ({flush_size:.0f} pts) — alta probabilidad institucional'
+                calidad = f'deep ({flush_size:.0f} pts) — high institutional probability'
             elif flush_size >= 10:
-                calidad = f'moderado ({flush_size:.0f} pts)'
+                calidad = f'moderate ({flush_size:.0f} pts)'
             else:
                 calidad = f'shallow ({flush_size:.0f} pts)'
             return {
@@ -420,15 +421,15 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
                 'flush_size':  flush_size,
                 'bars_ago':    i,
                 'descripcion': (
-                    f'✅ FAILED BREAKDOWN: {calidad}, hace {i} velas ({i*15} min), '
-                    f'precio {precio_actual_es:.0f} recuperado encima de {nivel:.0f}'
+                    f'✅ FAILED BREAKDOWN: {calidad}, {i} candles ago ({i*15} min), '
+                    f'price {precio_actual_es:.0f} recovered above {nivel:.0f}'
                 )
             }
 
     return {'es_fb': False, 'flush_size': 0, 'bars_ago': 0,
             'descripcion': (
-                f'⚠️ Sin FB: precio {precio_actual_es:.0f} encima de {nivel:.0f} '
-                f'pero sin secuencia elevator down → flush → recovery'
+                f'⚠️ No FB: price {precio_actual_es:.0f} above {nivel:.0f} '
+                f'but no elevator down → flush → recovery sequence'
             )}
 
 
@@ -436,74 +437,74 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
 # Generación de señal con LLM
 # ─────────────────────────────────────────────
 
-SIGNAL_PROMPT = """Eres Adam Mancini analizando si debes entrar en un trade ahora mismo en ES futures.
+SIGNAL_PROMPT = """You are Adam Mancini deciding whether you should enter a trade right now in ES futures.
 
 ══════════════════════════════════════════════════════════
-METODOLOGÍA (base fija, siempre aplica):
+METHODOLOGY (fixed base, always applies):
 ══════════════════════════════════════════════════════════
-Tu ÚNICO setup de entrada es el Failed Breakdown:
-  1. Elevator down: precio cae vertical hacia un mínimo significativo
-  2. Flush DEBAJO del mínimo (trampa a los shorts, institucionales acumulan)
-  3. Recovery ENCIMA del mínimo → trigger de entrada
-  4. Esperar ACEPTACIÓN o protocolo no-aceptación (5+ pts encima, 2 min)
+Your ONLY entry setup is the Failed Breakdown:
+  1. Elevator down: price drops vertically toward a significant low
+  2. Flush BELOW the low (trap for shorts, institutions accumulate)
+  3. Recovery ABOVE the low → entry trigger
+  4. Wait for ACCEPTANCE or the non-acceptance protocol (5+ pts above, 2 min)
 
-Mínimo significativo válido SOLO:
-  - Low del día anterior (daily low)
-  - Low multi-hora (mínimo que tardó 2+ horas en formarse, caída 20+ pts)
-  - Shelf de lows (varios lows en la misma zona durante varias horas)
+A significant low is valid ONLY if it is:
+  - Previous day's low (daily low)
+  - Multi-hour low (a low that took 2+ hours to form, 20+ pt drop)
+  - Shelf of lows (several lows in the same zone over several hours)
 
-También tienes el Level Reclaim / Backtest:
-  Resistencia rota al alza que se convierte en soporte → long en el backtest.
+You also have the Level Reclaim / Backtest:
+  A resistance broken to the upside that becomes support → long on the backtest.
 
-NUNCA: knife catch, niveles menores "tested to death", ir short.
+NEVER: knife catch, minor levels "tested to death", going short.
 
 ══════════════════════════════════════════════════════════
-TU PLAN PARA HOY:
+YOUR PLAN FOR TODAY:
 ══════════════════════════════════════════════════════════
 {content_plan}
 
 ══════════════════════════════════════════════════════════
-TUS TWEETS DE HOY:
+YOUR TWEETS FROM TODAY:
 ══════════════════════════════════════════════════════════
 {tweets_hoy}
 
 ══════════════════════════════════════════════════════════
-SITUACIÓN ACTUAL:
+CURRENT SITUATION:
 ══════════════════════════════════════════════════════════
-Hora EST:            {hora_est}
-Precio ES actual:    {precio_es}
-Nivel bajo análisis: {nivel} ({tipo_nivel})
-Bias del día:        {bias}
+EST time:             {hora_est}
+Current ES price:     {precio_es}
+Level under analysis: {nivel} ({tipo_nivel})
+Bias for the day:     {bias}
 
-VENTANA DE TRADING Y CRITERIO APLICABLE:
+TRADING WINDOW AND APPLICABLE CRITERION:
 {criterio_ventana}
 
-ANÁLISIS DE FAILED BREAKDOWN:
+FAILED BREAKDOWN ANALYSIS:
 {fb_descripcion}
 
-VELA 15 MINUTOS: O:{open_15} H:{high_15} L:{low_15} C:{close_15}
-Confirmación técnica: {confirmacion}
+15-MINUTE CANDLE: O:{open_15} H:{high_15} L:{low_15} C:{close_15}
+Technical confirmation: {confirmacion}
 
 ══════════════════════════════════════════════════════════
-EVALUACIÓN:
+EVALUATION:
 ══════════════════════════════════════════════════════════
-1. ¿Este nivel ({nivel}) es accionable según tu plan de hoy?
-2. ¿Hay un Failed Breakdown real con elevator down + flush + recovery?
-   ¿El nivel es un mínimo significativo mayor (daily low, multi-hora, shelf)?
-3. Aplica el criterio de la ventana horaria indicado arriba.
-4. ¿Tus tweets de hoy confirman o contraindican?
+1. Is this level ({nivel}) actionable according to your plan for today?
+2. Is there a real Failed Breakdown with elevator down + flush + recovery?
+   Is the level a significant major low (daily low, multi-hour, shelf)?
+3. Apply the time-window criterion indicated above.
+4. Do your tweets from today confirm or contraindicate it?
 
-REGLA DE STOP: stop DEBE ser MENOR que entrada para LONG (máx 15 pts de riesgo).
+STOP RULE: stop MUST be LOWER than entry for a LONG (max 15 pts of risk).
 
-Responde SOLO con JSON válido:
+Respond ONLY with valid JSON:
 {{
-  "entrar": true o false,
-  "razon": "explica ventana, si hay FB real con elevator down claro, y el nivel",
-  "entrada_es": número,
-  "stop_es": número (MENOR que entrada_es),
-  "target1_es": número (siguiente nivel del newsletter arriba),
-  "target2_es": número o null,
-  "confianza": 0.0 a 1.0
+  "entrar": true or false,
+  "razon": "explain the window, whether there is a real FB with a clear elevator down, and the level",
+  "entrada_es": number,
+  "stop_es": number (LOWER than entrada_es),
+  "target1_es": number (next newsletter level above),
+  "target2_es": number or null,
+  "confianza": 0.0 to 1.0
 }}"""
 
 
@@ -524,7 +525,7 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
     content_plan = (
         today.get('content_plan') or
         today.get('setup', '') + '\n' + today.get('invalida_si', '') or
-        'Plan no disponible'
+        'Plan not available'
     )
     hora_est, _, _ = get_trading_window()
 
@@ -535,12 +536,12 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
         high_15  = f"{v['high']  * m:.1f}"
         low_15   = f"{v['low']   * m:.1f}"
         close_15 = f"{v['close'] * m:.1f}"
-        confirmacion = ("SÍ — vela alcista confirma"
+        confirmacion = ("YES — bullish candle confirms"
                         if confirmar_con_vela_15min(bars_15, nivel, direccion)
-                        else "NO — vela no confirma")
+                        else "NO — candle does not confirm")
     else:
         open_15 = high_15 = low_15 = close_15 = f"{precio_es:.1f}"
-        confirmacion = "Sin datos de vela 15min"
+        confirmacion = "No 15min candle data"
 
     prompt = SIGNAL_PROMPT.format(
         content_plan     = content_plan,
@@ -552,7 +553,7 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
         direccion        = direccion.upper(),
         bias             = today.get('bias', 'unknown'),
         criterio_ventana = criterio_ventana,
-        fb_descripcion   = (fb_info or {}).get('descripcion', '⚠️ Sin análisis'),
+        fb_descripcion   = (fb_info or {}).get('descripcion', '⚠️ No analysis'),
         open_15          = open_15,
         high_15          = high_15,
         low_15           = low_15,
@@ -901,7 +902,13 @@ class SignalEngine:
                 break
 
             else:
-                print(f"  ❌ LLM: No entrar — {señal.get('razon', '')[:100]}")
+                # Imprimir la razón COMPLETA del LLM (antes estaba truncada a 100 chars).
+                # Se formatea en varias líneas para que sea legible en consola.
+                razon = señal.get('razon', '')
+                lineas = textwrap.wrap(razon, width=95)
+                print(f"  ❌ LLM: No entrar — {lineas[0] if lineas else ''}")
+                for linea in lineas[1:]:
+                    print(f"                     {linea}")
                 self._marcar_cooldown(nivel, minutos=COOLDOWN_NO_ENTRY_MIN)
 
         # A-2: persistir al final del tick

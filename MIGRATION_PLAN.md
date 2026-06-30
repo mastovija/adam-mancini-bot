@@ -1,0 +1,112 @@
+# Spanish → English Migration Plan
+
+> **Status:** inventory only — nothing edited yet.
+> **Generated:** 2026-06-30
+> **Scope:** all project source (`.py`, `.md`, `.txt`, `.example`). Excludes `venv/`, `.git/`, `__pycache__/`, and `data/` (price-bar JSON).
+
+## How to read this
+
+Files are grouped by **file**, ordered by the **migration priority** of their highest-value content:
+
+1. **LLM-facing prompts** sent to the Claude API — *correctness-critical, migrate first*
+2. **Telegram user-facing messages** — what the human actually reads on their phone
+3. **Console / log output** — operator-facing print/log strings
+4. **Code comments & docstrings** — developer-facing
+5. **Docs / README / config** — supporting material
+
+"Spanish lines" = rough line count of lines containing Spanish (accented chars or ≥2 Spanish keywords), via a heuristic scan. Treat as ±10%. Many files mix categories, so each file lists its internal breakdown.
+
+**Repo total: ~1,050 Spanish lines across 20 files.** `README.md` is already English (0 lines) — no action needed.
+
+---
+
+## TIER 1 — LLM prompts (Claude API)  🔴 highest priority — ✅ COMPLETE
+
+These are `f"""…"""` templates passed as `messages=[{"role":"user","content":prompt}]`. Mistranslation here changes model behavior, not just readability. Each prompt file *also* carries heavy Spanish docstrings/comments (counted separately below — those remain Spanish, handled in Tier 3/4).
+
+**The assembled prompt Claude reads is now fully English in all three call paths, including every string interpolated at runtime. JSON output *key* names are preserved (parsing depends on them); *values* — free-text and enums — are English.**
+
+- [ ] **`knowledge_base/processor.py`** — *~37 Spanish lines*
+  - [x] 🔴 `EXTRACTION_PROMPT` (L32–L56, ~25 lines) — newsletter → structured bias/levels extraction ✅ translated to English (keys unchanged)
+  - [ ] docstrings/comments (~12 lines): module docstring, `ESTRATEGIA DE EXTRACCIÓN`, fallback comments
+- [ ] **`parsers/tweet_monitor.py`** — *~86 Spanish lines*
+  - [x] 🔴 `CLASIFICACION_PROMPT` (L166–L223, ~58 lines) — tweet classifier prompt ✅ fully English, incl. `tipo` enum values now `signal`/`level`/`comment`/`other` (was `senal`/`nivel`/`comentario`/`otro`). All comparison/default sites updated: `tweet_monitor.py` (return default L278, `.get` default L384, `== 'level'` L401) **and** consumer `bot/telegram_alerts.py` (lookup-dict keys L227-232 + default L224 + `__main__` sample L409). Keys unchanged.
+  - [ ] docstrings/comments (~73 lines): module header `CÓMO FUNCIONA`, market-hours logic, save-state comments
+  - [ ] print/log strings (~3 lines)
+- [ ] **`signals/signal_engine.py`** — *~209 Spanish lines (largest file in repo)*
+  - [x] 🔴 `SIGNAL_PROMPT` (L440–L508, ~69 lines) — the core entry-decision prompt ✅ translated to English (keys unchanged)
+  - [x] 🔴 `formatear_tweets_para_prompt()` ✅ translated (LLM-facing return strings)
+  - [x] 🔴 Runtime-interpolated prompt fragments ✅ all translated: `get_trading_window()` `ventana`+`criterio` return strings (incl. "FUERA del horario…"), `confirmacion` strings, `detect_failed_breakdown` `descripcion` values + `calidad` fragments (`profundo`/`moderado`→`deep`/`moderate`), `content_plan` fallback (`Plan no disponible`), `fb_descripcion` fallback (`Sin análisis`), and the `tipo_nivel` values `soporte`/`resistencia`/`pivote`→`support`/`resistance`/`pivot` (producers L105/108/112 + consumer `determinar_lado` L314-315). *Note: `entrar: false` left literal inside criterio strings — it references the JSON output key.*
+  - [ ] Telegram management-alert strings (T1/T2/stop-hit) — *see Tier 2 note*
+  - [ ] docstrings/comments (~129 lines): module header `MEJORAS AÑADIDAS`, state-persistence, cooldown, main-loop docstrings
+  - [ ] print/log strings (~5 lines)
+
+> **Out of scope / not touched:** `backtest/backtester.py` keeps its own independent `soporte`/`resistencia`/`pivote` level dicts — it shares no runtime data with `signal_engine.py` and never feeds `SIGNAL_PROMPT` (offline tool, Tier 3). The Spanish display strings in `telegram_alerts.py` (`SEÑAL ACCIONABLE`, etc.) and the Spanish docstrings/comments in all three files remain — those are Tier 2/3/4.
+
+---
+
+## TIER 2 — Telegram user-facing messages  🟠
+
+Strings sent to the user's phone via `bot.send_message(...)` / `alerter.send(...)`.
+
+- [ ] **`bot/telegram_alerts.py`** — *~65 Spanish lines*
+  - [ ] 🟠 Message templates (~32 string lines): 📋 Briefing matutino, ⚡ Alerta de señal, level-list formatter ("Limita a max_show niveles…"), emoji-labelled sections
+  - [ ] docstrings/comments (~29 lines): module header "Envía tres tipos de mensajes al móvil", `USO (test rápido)`
+  - [ ] print/log (~1 line)
+- [ ] **`main.py`** — *~43 Spanish lines*
+  - [ ] 🟠 User-facing alert text via `alerter.send(...)` — e.g. `"❌ Error newsletter: {e}"` and the plain-text aviso comment (L86–L89)
+  - [ ] docstrings/comments (~34 lines): orchestration flow docstrings
+  - [ ] print/log (~5 lines)
+- [ ] **`signals/signal_engine.py`** *(cross-ref)* — management-alert Telegram strings live here; migrate alongside its Tier-1 prompt work.
+
+---
+
+## TIER 3 — Console / log output  🟡
+
+Operator-facing `print(...)` / `logging` strings. Listed by print/log line weight.
+
+- [ ] **`backtest/backtester.py`** — *~124 Spanish lines* (print/log ~22, strings ~27, comments/docstrings ~56, other ~19) — heaviest non-prompt file
+- [ ] **`scrapers/substack_scraper.py`** — *~64 lines* (print/log ~11, comments/docstrings ~49)
+- [ ] **`scrapers/twitter_scraper.py`** — *~32 lines* (print/log ~11, comments/docstrings ~20)
+- [ ] **`market_data/ibkr_feed.py`** — *~73 lines* (print/log ~10, docstrings/comments ~51, other ~8)
+- [ ] **`parsers/newsletter_parser.py`** — *~46 lines* (print/log ~9, docstrings/comments ~34)
+- [ ] **`backtest/download_data.py`** — *~30 lines* (print/log ~8, comments/docstrings ~21)
+- [ ] **`knowledge_base/build_kb.py`** — *~35 lines* (print/log ~8, comments/docstrings ~24)
+- [ ] **`knowledge_base/add_tweets_to_kb.py`** — *~38 lines* (print/log ~5, comments/docstrings ~26, strings ~6)
+- [ ] **`market_data/alpaca_feed.py`** — *~38 lines* (print/log ~5, docstrings/comments ~26, strings ~5)
+- [ ] **`scrapers/twitter_scraper_playwright.py`** — *~31 lines* (print/log ~4, comments/docstrings ~22)
+
+---
+
+## TIER 4 — Code comments & docstrings (comment-dominant files)  🟢
+
+Files whose Spanish is almost entirely developer-facing.
+
+- [ ] **`knowledge_base/vectordb.py`** — *~34 lines* (docstrings/comments ~30, strings ~3)
+- [ ] **`parsers/playwright_utils.py`** — *~14 lines* (comments ~12, docstrings ~4)
+- [ ] **`clear_recent_slugs.py`** — *minimal* (small utility; spot-check comments, ~0–3 lines)
+
+> Note: comment/docstring Spanish is also embedded in every Tier-1/2/3 file above — handle it in the same pass as that file rather than separately.
+
+---
+
+## TIER 5 — Docs / config  ⚪
+
+- [ ] **`config.py`** — *~33 lines* (almost all comments: module header `Configuración central`, `SPY_TO_ES_MULTIPLIER` notes, IBKR/Alpaca fallback comments; ~2 strings)
+- [ ] **`.env.example`** — *~8 lines* (Spanish setup comments, 7 comment lines)
+- [ ] **`requirements.txt`** — *~10 lines* (Spanish section comments, ~3 comment lines)
+- [ ] **`README.md`** — ✅ **already English** (0 Spanish lines) — no action
+
+---
+
+## Suggested execution order
+
+1. Tier 1 prompt blocks (`EXTRACTION_PROMPT`, `CLASIFICACION_PROMPT`, `SIGNAL_PROMPT`) — verify model output unchanged after translating.
+2. Tier 2 Telegram templates — eyeball rendered messages.
+3. Sweep each file end-to-end for Tiers 3–5 (logs + comments + docstrings) so each file is touched once.
+4. Update `config.py` / `.env.example` / `requirements.txt` comments last.
+
+**Watch-outs**
+- All variable/function names are English **except** a few Spanish-named helpers: `formatear_tweets_para_prompt()` (signal_engine.py) and constants like `CLASIFICACION_PROMPT`. Renaming these is optional and requires updating call sites.
+- Emoji and Telegram HTML tags (`parse_mode=ParseMode.HTML`) must survive translation.
+- Prompt output schemas (JSON keys the model must emit) are English already — translate only the natural-language instructions, not the field names, or downstream parsing breaks.

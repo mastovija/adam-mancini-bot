@@ -29,31 +29,31 @@ from config import ANTHROPIC_API_KEY, LLM_MODEL
 # Prompt de extracción
 # ─────────────────────────────────────────────
 
-EXTRACTION_PROMPT = """Analiza este newsletter de trading del S&P 500/ES futures.
+EXTRACTION_PROMPT = """Analyze this S&P 500/ES futures trading newsletter.
 
-Título: {title}
-Fecha: {date}
+Title: {title}
+Date: {date}
 
-INICIO DEL ARTÍCULO (análisis y contexto):
+START OF THE ARTICLE (analysis and context):
 {content_start}
 
-SECCIÓN TRADE PLAN (niveles del día):
+TRADE PLAN SECTION (levels for the day):
 {content_end}
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional, sin markdown:
+Respond ONLY with valid JSON, no extra text, no markdown:
 {{
   "bias": "bullish" | "bearish" | "neutral" | "mixed",
-  "condicion_bias": "una frase corta con la condición principal",
-  "soportes": [TODOS los niveles numéricos de soporte que aparezcan en 'Supports are:'],
-  "resistencias": [TODOS los niveles numéricos de resistencia que aparezcan en 'Resistances are:'],
-  "nivel_critico": el nivel más importante del día o null,
-  "setup": "descripción del setup principal en máximo 2 frases",
-  "invalida_si": "qué condición invalidaría la tesis o null"
+  "condicion_bias": "a short sentence with the main condition",
+  "soportes": [ALL numeric support levels that appear under 'Supports are:'],
+  "resistencias": [ALL numeric resistance levels that appear under 'Resistances are:'],
+  "nivel_critico": the most important level of the day or null,
+  "setup": "description of the main setup in at most 2 sentences",
+  "invalida_si": "what condition would invalidate the thesis or null"
 }}
 
-Extrae TODOS los niveles de las listas 'Supports are:' y 'Resistances are:', no solo los (major).
-Si no hay listas explícitas, extrae los niveles mencionados en el texto narrativo.
-Si un campo no aparece: null para valores simples, [] para listas."""
+Extract ALL levels from the 'Supports are:' and 'Resistances are:' lists, not just the (major) ones.
+If there are no explicit lists, extract the levels mentioned in the narrative text.
+If a field does not appear: null for simple values, [] for lists."""
 
 
 # ─────────────────────────────────────────────

@@ -163,63 +163,63 @@ async def obtener_tweets_recientes() -> list:
 # Clasificación con LLM
 # ─────────────────────────────────────────────
 
-CLASIFICACION_PROMPT = """Analiza este tweet de Adam Mancini, trader del S&P 500/ES futures.
+CLASIFICACION_PROMPT = """Analyze this tweet from Adam Mancini, an S&P 500/ES futures trader.
 
 Tweet: "{texto}"
-Fecha del tweet: {fecha}
+Tweet date: {fecha}
 
 ═══════════════════════════════════════════════════
-DISTINCIÓN CRÍTICA — LEE CON ATENCIÓN:
+CRITICAL DISTINCTION — READ CAREFULLY:
 ═══════════════════════════════════════════════════
-Solo marcar accionable=true si Adam está anunciando una entrada AHORA MISMO
-o dando instrucciones para actuar EN ESTE MOMENTO.
+Only set accionable=true if Adam is announcing an entry RIGHT NOW
+or giving instructions to act AT THIS MOMENT.
 
-NUNCA marcar accionable=true si Adam está:
-  - Describiendo un trade que hizo ayer o antes ("yesterday", "ystd", "last night",
+NEVER set accionable=true if Adam is:
+  - Describing a trade he took yesterday or earlier ("yesterday", "ystd", "last night",
     "we got a long at 3:45PM ystd", "as posted", "in the books", "paid", "triggered")
-  - Haciendo recap o resumen de operaciones pasadas
-  - Diciendo que ya alcanzó un target ("7558 1st target hit")
-  - Comentando o analizando sin dar instrucción de entrada nueva
+  - Recapping or summarizing past trades
+  - Saying a target was already hit ("7558 1st target hit")
+  - Commenting or analyzing without giving a new entry instruction
 
-SEÑALES REALES (accionable=true) suenan así:
+REAL SIGNALS (accionable=true) sound like this:
   - "Going long here at 7485"
   - "Long trigger at 7502 if ES recovers"
   - "Buy the Failed Breakdown of 7509 NOW"
   - "Entering long at 7478"
 
-NO SEÑALES (accionable=false) suenan así:
-  - "We got a massive long yesterday at 7485" ← PASADO
-  - "Longs triggered yesterday at 3:45PM" ← PASADO
-  - "7558 1st target hit" ← RESULTADO de trade pasado
-  - "Don't trade, OPEX noise" ← consejo general sin entrada
-  - "Watch 7535 as support" ← nivel, no entrada
+NON-SIGNALS (accionable=false) sound like this:
+  - "We got a massive long yesterday at 7485" ← PAST
+  - "Longs triggered yesterday at 3:45PM" ← PAST
+  - "7558 1st target hit" ← RESULT of a past trade
+  - "Don't trade, OPEX noise" ← general advice, no entry
+  - "Watch 7535 as support" ← a level, not an entry
 
 ═══════════════════════════════════════════════════
-VALIDACIÓN MATEMÁTICA OBLIGATORIA:
+MANDATORY MATHEMATICAL VALIDATION:
 ═══════════════════════════════════════════════════
-Si accionable=true y direccion="long":
-  - stop DEBE ser MENOR que entrada (el stop de un long es abajo)
-  - Ejemplo correcto: entrada=7485, stop=7470 ✓
-  - Ejemplo INCORRECTO: entrada=7485, stop=7535 ✗ (imposible — sería un short)
+If accionable=true and direccion="long":
+  - stop MUST be LOWER than entrada (a long's stop is below)
+  - Correct example: entrada=7485, stop=7470 ✓
+  - INCORRECT example: entrada=7485, stop=7535 ✗ (impossible — that would be a short)
 
-Si accionable=true y direccion="short":
-  - stop DEBE ser MAYOR que entrada
-  - Ejemplo correcto: entrada=7558, stop=7570 ✓
+If accionable=true and direccion="short":
+  - stop MUST be HIGHER than entrada
+  - Correct example: entrada=7558, stop=7570 ✓
 
-Si los niveles del tweet no permiten cumplir esta regla → accionable=false.
+If the tweet's levels do not allow this rule to be satisfied → accionable=false.
 
 ═══════════════════════════════════════════════════
-Responde SOLO con JSON válido, sin texto adicional:
+Respond ONLY with valid JSON, no extra text:
 {{
-  "tipo": "senal" | "nivel" | "comentario" | "otro",
+  "tipo": "signal" | "level" | "comment" | "other",
   "accionable": true | false,
   "es_referencia_pasada": true | false,
   "direccion": "long" | "short" | null,
-  "entrada": número o null,
-  "stop": número o null,
-  "target": número o null,
-  "niveles_mencionados": [lista de números ES],
-  "resumen": "una frase corta de lo que dice Adam en este tweet"
+  "entrada": number or null,
+  "stop": number or null,
+  "target": number or null,
+  "niveles_mencionados": [list of ES numbers],
+  "resumen": "a short sentence describing what Adam says in this tweet"
 }}"""
 
 
@@ -275,7 +275,7 @@ async def clasificar_tweet(texto: str, fecha: str) -> dict:
         clasificacion = json.loads(raw)
     except Exception as e:
         return {
-            "tipo": "otro",
+            "tipo": "other",
             "accionable": False,
             "resumen": texto[:100],
             "error": str(e)
@@ -381,7 +381,7 @@ async def monitorizar():
                         if en_mercado:
                             # C-13: clasificar_tweet es ahora async
                             clasificacion = await clasificar_tweet(texto, fecha)
-                            tipo = clasificacion.get('tipo', 'otro')
+                            tipo = clasificacion.get('tipo', 'other')
 
                             # ── Si fue rechazado → mostrar motivo en log ──
                             motivo = clasificacion.get('_motivo_rechazo')
@@ -398,7 +398,7 @@ async def monitorizar():
                                 entrada   = clasificacion.get('entrada')
                                 print(f"     ✅ Señal: {direccion} | entrada {entrada}")
 
-                            elif tipo == 'nivel':
+                            elif tipo == 'level':
                                 print(f"     📍 Niveles: {clasificacion.get('niveles_mencionados', [])}")
 
                         # Guardar todos los tweets del día para contexto del LLM
