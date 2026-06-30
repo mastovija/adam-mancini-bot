@@ -1,12 +1,12 @@
 """
-knowledge_base/vectordb.py — Base vectorial con ChromaDB
+knowledge_base/vectordb.py — Vector store with ChromaDB
 =========================================================
-Gestiona la colección ChromaDB donde se almacena todo el conocimiento
-de Adam Mancini. Cada documento es un artículo del newsletter.
+Manages the ChromaDB collection that stores all of Adam Mancini's
+knowledge. Each document is a newsletter article.
 
-Dos operaciones principales:
-  - add_article(): indexa un artículo con sus metadatos
-  - query_similar(): busca situaciones similares a la actual
+Two main operations:
+  - add_article(): indexes an article with its metadata
+  - query_similar(): searches for situations similar to the current one
 """
 
 import json
@@ -21,61 +21,61 @@ from config import CHROMA_DIR, CHROMA_COLLECTION
 
 
 # ─────────────────────────────────────────────
-# Inicialización de la colección
+# Collection initialization
 # ─────────────────────────────────────────────
 
 def get_collection():
     """
-    Obtiene (o crea si no existe) la colección ChromaDB.
+    Gets (or creates if it doesn't exist) the ChromaDB collection.
 
-    La colección persiste en disco en data/chromadb/
-    Usa all-MiniLM-L6-v2 como modelo de embeddings (se descarga ~80MB la primera vez)
+    The collection persists to disk in data/chromadb/
+    Uses all-MiniLM-L6-v2 as the embedding model (~80MB downloaded on first run)
     """
     client = chromadb.PersistentClient(path=str(CHROMA_DIR))
 
-    # DefaultEmbeddingFunction usa ONNX (all-MiniLM-L6-v2 cuantizado).
-    # Es la alternativa a sentence-transformers, que no soporta Python 3.13.
+    # DefaultEmbeddingFunction uses ONNX (quantized all-MiniLM-L6-v2).
+    # It's the alternative to sentence-transformers, which doesn't support Python 3.13.
     ef = embedding_functions.DefaultEmbeddingFunction()
 
 
     collection = client.get_or_create_collection(
         name=CHROMA_COLLECTION,
         embedding_function=ef,
-        metadata={"hnsw:space": "cosine"}  # similitud coseno para textos
+        metadata={"hnsw:space": "cosine"}  # cosine similarity for text
     )
 
     return collection
 
 
 # ─────────────────────────────────────────────
-# Añadir artículos
+# Add articles
 # ─────────────────────────────────────────────
 
 def add_article(collection, article: dict, trading_info: dict):
     """
-    Indexa un artículo en ChromaDB.
+    Indexes an article in ChromaDB.
 
-    Qué se vectoriza (el 'documento'):
-      Combinamos título, bias, setup y contenido para que la búsqueda
-      semántica encuentre artículos similares por contexto de mercado.
+    What gets vectorized (the 'document'):
+      We combine title, bias, setup and content so that semantic search
+      finds similar articles by market context.
 
-    Qué va en metadatos:
-      Campos estructurados para filtrar (bias, fecha, niveles).
-      ChromaDB permite filtrar por metadatos antes de buscar por similitud.
+    What goes into metadata:
+      Structured fields for filtering (bias, date, levels).
+      ChromaDB allows filtering by metadata before searching by similarity.
 
     Args:
-        collection: colección ChromaDB (de get_collection())
-        article: dict del newsletter (slug, title, content, published_at...)
-        trading_info: dict extraído por processor.py (bias, soportes...)
+        collection: ChromaDB collection (from get_collection())
+        article: newsletter dict (slug, title, content, published_at...)
+        trading_info: dict extracted by processor.py (bias, soportes...)
     """
 
-    # ── Texto a vectorizar ────────────────────────────────────────────────
-    # Combinamos la info estructurada con el contenido original.
-    # Esto mejora la búsqueda semántica: podemos buscar "SPX rebotando en soporte bullish"
-    # y encontrar artículos donde Adam describía esa situación.
+    # ── Text to vectorize ─────────────────────────────────────────────────
+    # We combine the structured info with the original content.
+    # This improves semantic search: we can search "SPX bouncing off bullish support"
+    # and find articles where Adam described that situation.
     bias_str   = trading_info.get('bias', 'unknown') or 'unknown'
     setup_str  = trading_info.get('setup', '') or ''
-    content    = article.get('content', '')[:1500]  # máx 1500 chars
+    content    = article.get('content', '')[:1500]  # max 1500 chars
 
     document_text = (
         f"Fecha: {article.get('published_at', '')}\n"
@@ -85,9 +85,9 @@ def add_article(collection, article: dict, trading_info: dict):
         f"{content}"
     )
 
-    # ── Metadatos para filtrado ───────────────────────────────────────────
-    # ChromaDB solo acepta strings, ints, floats y bools en metadatos.
-    # Las listas las serializamos como string JSON.
+    # ── Metadata for filtering ────────────────────────────────────────────
+    # ChromaDB only accepts strings, ints, floats and bools in metadata.
+    # Lists are serialized as a JSON string.
     soportes      = trading_info.get('soportes', []) or []
     resistencias  = trading_info.get('resistencias', []) or []
     nivel_critico = trading_info.get('nivel_critico')
@@ -97,16 +97,16 @@ def add_article(collection, article: dict, trading_info: dict):
         "title":          article.get('title', '')[:100],
         "bias":           bias_str,
         "nivel_critico":  float(nivel_critico) if nivel_critico else 0.0,
-        "soportes":       json.dumps(soportes),       # lista como string
-        "resistencias":   json.dumps(resistencias),   # lista como string
+        "soportes":       json.dumps(soportes),       # list as string
+        "resistencias":   json.dumps(resistencias),   # list as string
         "setup":          (setup_str or '')[:200],
         "is_complete":    bool(article.get('is_complete', False)),
         "content_length": len(article.get('content', '')),
     }
 
-    # ── Añadir a la colección ─────────────────────────────────────────────
-    # El ID es el slug del artículo (único por artículo)
-    collection.upsert(  # upsert = add si no existe, update si existe
+    # ── Add to the collection ─────────────────────────────────────────────
+    # The ID is the article slug (unique per article)
+    collection.upsert(  # upsert = add if it doesn't exist, update if it does
         documents=[document_text],
         metadatas=[metadata],
         ids=[article.get('slug', article.get('id', str(hash(article.get('title', '')))))]
@@ -114,7 +114,7 @@ def add_article(collection, article: dict, trading_info: dict):
 
 
 # ─────────────────────────────────────────────
-# Consultar la base de conocimiento
+# Query the knowledge base
 # ─────────────────────────────────────────────
 
 def query_similar(
@@ -125,25 +125,25 @@ def query_similar(
     min_content_length: int = 200
 ) -> list:
     """
-    Busca en el historial de Adam situaciones similares a la actual.
+    Searches Adam's history for situations similar to the current one.
 
-    Ejemplo de uso:
+    Usage example:
         results = query_similar(
             collection,
-            "ES en 5400 rechazando resistencia con momentum bajista",
+            "ES at 5400 rejecting resistance with bearish momentum",
             bias_filter="bearish"
         )
 
     Args:
-        query: descripción de la situación actual del mercado
-        n_results: cuántos artículos similares devolver
-        bias_filter: 'bullish', 'bearish', 'neutral', 'mixed' o None
-        min_content_length: filtrar artículos muy cortos
+        query: description of the current market situation
+        n_results: how many similar articles to return
+        bias_filter: 'bullish', 'bearish', 'neutral', 'mixed' or None
+        min_content_length: filter out very short articles
 
     Returns:
-        Lista de dicts con: date, title, bias, setup, content, distance
+        List of dicts with: date, title, bias, setup, content, distance
     """
-    # Construir filtro de metadatos
+    # Build the metadata filter
     where_clauses = []
 
     if bias_filter:
@@ -158,7 +158,7 @@ def query_similar(
     elif len(where_clauses) > 1:
         where = {"$and": where_clauses}
 
-    # Ejecutar búsqueda semántica
+    # Run the semantic search
     results = collection.query(
         query_texts=[query],
         n_results=n_results,
@@ -166,7 +166,7 @@ def query_similar(
         include=["documents", "metadatas", "distances"]
     )
 
-    # Formatear resultados de forma legible
+    # Format results into a readable shape
     formatted = []
     if results and results['metadatas']:
         for i, meta in enumerate(results['metadatas'][0]):
@@ -185,14 +185,14 @@ def query_similar(
 
 
 # ─────────────────────────────────────────────
-# Utilidades
+# Utilities
 # ─────────────────────────────────────────────
 
 def get_stats(collection) -> dict:
-    """Devuelve estadísticas básicas de la colección."""
+    """Returns basic statistics for the collection."""
     total = collection.count()
 
-    # Contar por bias (pequeña muestra para no cargar todo)
+    # Count by bias (small sample to avoid loading everything)
     sample = collection.get(limit=total, include=["metadatas"])
     biases = {}
     for meta in sample['metadatas']:

@@ -1,15 +1,15 @@
 """
-backtest/download_data.py — Descarga datos históricos de SPY desde Alpaca
+backtest/download_data.py — Downloads historical SPY data from Alpaca
 =========================================================================
-Descarga barras de 1 minuto de SPY para el período que tenemos de tweets
-(Feb 26 - Jun 6, 2026) y las guarda localmente para el backtesting.
+Downloads 1-minute SPY bars for the period we have tweets for
+(Feb 26 - Jun 6, 2026) and saves them locally for backtesting.
 
-USO:
+USAGE:
     python backtest/download_data.py
 
-RESULTADO:
-    data/backtest/spy_bars/YYYY-MM-DD.json   (un archivo por día de trading)
-    data/backtest/spy_bars/index.json         (lista de días disponibles)
+RESULT:
+    data/backtest/spy_bars/YYYY-MM-DD.json   (one file per trading day)
+    data/backtest/spy_bars/index.json         (list of available days)
 """
 
 import json
@@ -34,33 +34,33 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Configuración
+# Configuration
 # ─────────────────────────────────────────────
 BACKTEST_DIR  = DATA_DIR / 'backtest'
 BARS_DIR      = BACKTEST_DIR / 'spy_bars'
 
-# Período a descargar: coincide con el período de tweets que tenemos
-# Ajusta estas fechas según tu dataset
+# Period to download: matches the tweet period we have
+# Adjust these dates to fit your dataset
 DATE_START = datetime(2026, 2, 26, tzinfo=pytz.UTC)
 DATE_END   = datetime(2026, 6, 7,  tzinfo=pytz.UTC)
 
-# Alpaca limita las peticiones — descargamos semana a semana
+# Alpaca rate-limits requests — we download week by week
 CHUNK_DAYS = 7
 
 
 # ─────────────────────────────────────────────
-# Funciones
+# Functions
 # ─────────────────────────────────────────────
 
 def es_dia_laborable(dt: datetime) -> bool:
-    """Comprueba si un día es de lunes a viernes."""
+    """Checks whether a day is Monday to Friday."""
     return dt.weekday() < 5
 
 
 def bars_to_list(bars) -> list:
     """
-    Convierte el objeto de barras de Alpaca a una lista de dicts serializable.
-    Maneja diferentes versiones de alpaca-py.
+    Converts Alpaca's bars object to a serializable list of dicts.
+    Handles different versions of alpaca-py.
     """
     result = []
     try:
@@ -85,16 +85,16 @@ def bars_to_list(bars) -> list:
 
 def descargar_dia(client, fecha: datetime) -> list:
     """
-    Descarga las barras de 1 minuto de SPY para un día específico.
+    Downloads the 1-minute SPY bars for a specific day.
 
     Args:
-        fecha: fecha en UTC (solo se usa la fecha, no la hora)
+        fecha: date in UTC (only the date is used, not the time)
 
     Returns:
-        Lista de barras OHLCV, o lista vacía si hay error
+        List of OHLCV bars, or an empty list on error
     """
-    # Horario de mercado en UTC: 9:30 - 16:00 EST = 13:30 - 20:00 UTC
-    # Pedimos un poco más por si acaso
+    # Market hours in UTC: 9:30 - 16:00 EST = 13:30 - 20:00 UTC
+    # We request a little more just in case
     start = fecha.replace(hour=13, minute=0, second=0)
     end   = fecha.replace(hour=21, minute=0, second=0)
 
@@ -119,8 +119,8 @@ def descargar_dia(client, fecha: datetime) -> list:
 
 def download_historical_data():
     """
-    Descarga datos históricos de SPY para todo el período de backtesting.
-    Guarda un JSON por día de trading.
+    Downloads historical SPY data for the entire backtesting period.
+    Saves one JSON per trading day.
     """
     print("=" * 55)
     print("  Backtesting — Download Historical SPY Data")
@@ -135,7 +135,7 @@ def download_historical_data():
         secret_key = ALPACA_SECRET_KEY,
     )
 
-    # Generar lista de días laborables en el período
+    # Generate the list of weekdays in the period
     dias = []
     current = DATE_START
     while current < DATE_END:
@@ -145,7 +145,7 @@ def download_historical_data():
 
     print(f"📊 Weekdays in the period: {len(dias)}")
 
-    # Ver cuáles ya tenemos descargados
+    # See which ones we already have downloaded
     existentes = {f.stem for f in BARS_DIR.glob('*.json') if f.stem != 'index'}
     por_descargar = [d for d in dias if str(d.date()) not in existentes]
     print(f"✅ Already downloaded: {len(existentes)}")
@@ -168,7 +168,7 @@ def download_historical_data():
         bars = descargar_dia(client, fecha)
 
         if bars:
-            # Guardar barras del día
+            # Save the day's bars
             output = BARS_DIR / f"{fecha_str}.json"
             with open(output, 'w') as f:
                 json.dump(bars, f)
@@ -178,11 +178,11 @@ def download_historical_data():
             print("no data (holiday or error)")
             vacios += 1
 
-        # Pausa entre requests para no saturar la API
+        # Pause between requests to avoid hammering the API
         if i % 5 == 0:
             time.sleep(1)
 
-    # Guardar índice de días disponibles
+    # Save the index of available days
     dias_disponibles = sorted([f.stem for f in BARS_DIR.glob('*.json') if f.stem != 'index'])
     with open(BARS_DIR / 'index.json', 'w') as f:
         json.dump(dias_disponibles, f, indent=2)

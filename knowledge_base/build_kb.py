@@ -1,19 +1,19 @@
 """
-knowledge_base/build_kb.py — Construye la base de conocimiento de Adam Mancini
+knowledge_base/build_kb.py — Builds Adam Mancini's knowledge base
 ================================================================================
-Script principal de la Fase 2. Lee todos los artículos del newsletter,
-extrae la información de trading con Claude Haiku, y los indexa en ChromaDB.
+Main Phase 2 script. Reads every newsletter article, extracts the
+trading information with Claude Haiku, and indexes them in ChromaDB.
 
-USO:
+USAGE:
     python knowledge_base/build_kb.py
 
-TIEMPO ESTIMADO:
-    ~30-45 minutos para 1415 artículos (1-2 segundos por llamada a la API)
-    Coste estimado: ~$0.10-0.15 con Claude Haiku
+ESTIMATED TIME:
+    ~30-45 minutes for 1415 articles (1-2 seconds per API call)
+    Estimated cost: ~$0.10-0.15 with Claude Haiku
 
-REANUDABLE:
-    Si se interrumpe, vuelve a ejecutar y continúa desde donde lo dejó.
-    Los artículos ya procesados se guardan en data/processed/processed_slugs.json
+RESUMABLE:
+    If interrupted, run again and it continues from where it left off.
+    Already-processed articles are saved in data/processed/processed_slugs.json
 """
 
 import json
@@ -29,14 +29,14 @@ from knowledge_base.vectordb import get_collection, add_article, get_stats
 
 
 # ─────────────────────────────────────────────
-# Gestión del progreso
+# Progress management
 # ─────────────────────────────────────────────
-# Guardamos qué artículos ya procesamos para poder reanudar
+# We save which articles we already processed so we can resume
 PROGRESS_FILE = PROCESSED_DIR / 'processed_slugs.json'
 
 
 def load_progress() -> set:
-    """Carga los slugs de artículos ya procesados."""
+    """Loads the slugs of already-processed articles."""
     if PROGRESS_FILE.exists():
         with open(PROGRESS_FILE, 'r') as f:
             return set(json.load(f))
@@ -44,45 +44,45 @@ def load_progress() -> set:
 
 
 def save_progress(processed: set):
-    """Guarda los slugs procesados en disco."""
+    """Saves the processed slugs to disk."""
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     with open(PROGRESS_FILE, 'w') as f:
         json.dump(list(processed), f)
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 def build_knowledge_base():
     """
-    Proceso completo de construcción de la base de conocimiento:
+    Full knowledge-base build process:
 
-    1. Carga todos los artículos del newsletter de data/raw/newsletter/
-    2. Para cada artículo con contenido suficiente:
-       a. Llama a Claude Haiku para extraer bias, niveles, setup
-       b. Guarda el resultado en data/processed/
-       c. Indexa en ChromaDB con embeddings semánticos
-    3. Guarda progreso cada 10 artículos (para poder reanudar)
+    1. Loads every newsletter article from data/raw/newsletter/
+    2. For each article with enough content:
+       a. Calls Claude Haiku to extract bias, levels, setup
+       b. Saves the result to data/processed/
+       c. Indexes it in ChromaDB with semantic embeddings
+    3. Saves progress every 10 articles (so it can resume)
     """
     print("=" * 60)
     print("  Adam Mancini Bot — Phase 2: Knowledge Base")
     print("=" * 60)
 
-    # ── Inicializar ChromaDB ──────────────────────────────────────────────
+    # ── Initialize ChromaDB ───────────────────────────────────────────────
     print("\n📚 Initializing ChromaDB...")
     print("   (First run downloads the embeddings model ~80MB)")
     collection = get_collection()
     print(f"   ✅ Collection ready. Current documents: {collection.count()}")
 
-    # ── Cargar artículos disponibles ──────────────────────────────────────
+    # ── Load available articles ───────────────────────────────────────────
     article_files = sorted([
         f for f in NEWSLETTER_DIR.glob('*.json')
         if f.stem != 'index'
     ])
     print(f"\n📰 Articles in newsletter/: {len(article_files)}")
 
-    # ── Filtrar ya procesados ─────────────────────────────────────────────
+    # ── Filter out already-processed ──────────────────────────────────────
     processed = load_progress()
     to_process = [f for f in article_files if f.stem not in processed]
 
@@ -94,14 +94,14 @@ def build_knowledge_base():
         _print_stats(collection)
         return
 
-    # ── Estimar coste y tiempo ────────────────────────────────────────────
+    # ── Estimate cost and time ────────────────────────────────────────────
     est_minutes = len(to_process) * 1.5 / 60
-    est_cost    = len(to_process) * 0.00008  # ~$0.00008 por artículo con Haiku
+    est_cost    = len(to_process) * 0.00008  # ~$0.00008 per article with Haiku
     print(f"\n⏱️  Estimated time: ~{est_minutes:.0f} minutes")
     print(f"💰 Estimated cost:  ~${est_cost:.2f}")
     print()
 
-    # ── Procesamiento ─────────────────────────────────────────────────────
+    # ── Processing ────────────────────────────────────────────────────────
     print("🤖 Processing articles with Claude Haiku...")
     print("-" * 60)
 
@@ -111,14 +111,14 @@ def build_knowledge_base():
 
     for i, article_file in enumerate(to_process, 1):
 
-        # Cargar artículo
+        # Load article
         with open(article_file, 'r', encoding='utf-8') as f:
             article = json.load(f)
 
         title_short = article.get('title', '')[:50]
         date_str    = article.get('published_at', '')
 
-        # ── Saltar artículos sin contenido suficiente ─────────────────────
+        # ── Skip articles without enough content ──────────────────────────
         content_len = len(article.get('content', ''))
         if content_len < 150:
             processed.add(article_file.stem)
@@ -128,11 +128,11 @@ def build_knowledge_base():
         print(f"  [{i:4d}/{len(to_process)}] {date_str} — {title_short}...")
 
         try:
-            # ── Extraer info con LLM ──────────────────────────────────────
+            # ── Extract info with the LLM ─────────────────────────────────
             trading_info = extract_trading_info(article)
 
-            # ── Guardar resultado procesado en disco ──────────────────────
-            # Útil para debug y para no re-procesar si ChromaDB se borra
+            # ── Save the processed result to disk ─────────────────────────
+            # Useful for debugging and to avoid re-processing if ChromaDB is wiped
             output_file = PROCESSED_DIR / f"{article_file.stem}.json"
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(
@@ -140,13 +140,13 @@ def build_knowledge_base():
                     f, indent=2, ensure_ascii=False
                 )
 
-            # ── Indexar en ChromaDB ───────────────────────────────────────
+            # ── Index in ChromaDB ─────────────────────────────────────────
             add_article(collection, article, trading_info)
 
             processed.add(article_file.stem)
             ok += 1
 
-            # Mostrar lo extraído para ver que funciona
+            # Show what was extracted to confirm it works
             bias = trading_info.get('bias', '?')
             sop  = trading_info.get('soportes', [])
             res  = trading_info.get('resistencias', [])
@@ -155,20 +155,20 @@ def build_knowledge_base():
         except Exception as e:
             errors += 1
             print(f"       ❌ Error: {e}")
-            # No añadimos al processed para que se reintente la próxima vez
+            # We don't add it to processed so it gets retried next time
 
-        # ── Guardar progreso cada 10 artículos ────────────────────────────
+        # ── Save progress every 10 articles ───────────────────────────────
         if i % 10 == 0:
             save_progress(processed)
             print(f"\n  💾 Progress saved ({len(processed)} processed)\n")
 
-        # Pequeña pausa para no saturar la API
+        # Small pause to avoid hammering the API
         time.sleep(0.5)
 
-    # Guardar progreso final
+    # Save final progress
     save_progress(processed)
 
-    # ── Resumen ───────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print(f"✅ Processing complete")
     print(f"   Indexed:  {ok}")
@@ -181,7 +181,7 @@ def build_knowledge_base():
 
 
 def _print_stats(collection):
-    """Imprime estadísticas de la colección."""
+    """Prints statistics for the collection."""
     try:
         stats = get_stats(collection)
         print(f"\n📊 Knowledge base status:")
@@ -192,7 +192,7 @@ def _print_stats(collection):
 
 
 # ─────────────────────────────────────────────
-# Punto de entrada
+# Entry point
 # ─────────────────────────────────────────────
 
 if __name__ == '__main__':

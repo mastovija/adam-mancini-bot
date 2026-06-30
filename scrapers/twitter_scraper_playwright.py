@@ -1,23 +1,23 @@
 """
-scrapers/twitter_scraper_playwright.py — Descarga historial de tweets con Playwright
+scrapers/twitter_scraper_playwright.py — Downloads tweet history with Playwright
 =====================================================================================
-Usa Playwright para abrir un navegador real, cargar el perfil de Adam Mancini,
-hacer scroll automático hasta el fondo y capturar todos los tweets disponibles
-(hasta ~3200, límite que impone Twitter en su interfaz web).
+Uses Playwright to open a real browser, load Adam Mancini's profile,
+scroll automatically to the bottom and capture every available tweet
+(up to ~3200, the limit Twitter imposes in its web interface).
 
-USO:
+USAGE:
     python scrapers/twitter_scraper_playwright.py
 
-CÓMO FUNCIONA:
-    1. Abre Chromium con tus cookies de sesión (sin login)
-    2. Navega a x.com/AdamMancini4
-    3. Intercepta las llamadas GraphQL UserTweets que hace Twitter
-    4. Hace scroll al fondo para que Twitter cargue más tweets
-    5. Repite hasta no haber más tweets nuevos
-    6. Guarda todo en data/raw/tweets/adam_mancini_tweets.json
+HOW IT WORKS:
+    1. Opens Chromium with your session cookies (no login)
+    2. Navigates to x.com/AdamMancini4
+    3. Intercepts the GraphQL UserTweets calls Twitter makes
+    4. Scrolls to the bottom so Twitter loads more tweets
+    5. Repeats until there are no new tweets
+    6. Saves everything to data/raw/tweets/adam_mancini_tweets.json
 
-TIEMPO ESTIMADO: ~15-20 minutos para ~3000 tweets
-REANUDABLE: sí, los tweets ya descargados se saltan automáticamente
+ESTIMATED TIME: ~15-20 minutes for ~3000 tweets
+RESUMABLE: yes, already-downloaded tweets are skipped automatically
 """
 
 import asyncio
@@ -39,21 +39,21 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Configuración
+# Configuration
 # ─────────────────────────────────────────────
 OUTPUT_FILE      = TWEETS_DIR / 'adam_mancini_tweets.json'
 PROFILE_URL      = f'https://x.com/{TWITTER_TARGET}'
-SCROLL_DELAY_MS  = 2000   # ms entre scrolls (tiempo para que carguen tweets)
-MAX_SCROLLS      = 150    # máx scrolls = ~3000 tweets (20 por scroll)
-MAX_SIN_NUEVOS   = 5      # parar si N scrolls consecutivos sin tweets nuevos
+SCROLL_DELAY_MS  = 2000   # ms between scrolls (time for tweets to load)
+MAX_SCROLLS      = 150    # max scrolls = ~3000 tweets (20 per scroll)
+MAX_SIN_NUEVOS   = 5      # stop if N consecutive scrolls have no new tweets
 
 
 # ─────────────────────────────────────────────
-# Utilidades de archivo
+# File utilities
 # ─────────────────────────────────────────────
 
 def cargar_tweets_existentes() -> tuple[list, set]:
-    """Carga tweets ya descargados para no repetir trabajo."""
+    """Loads already-downloaded tweets so we don't repeat work."""
     if OUTPUT_FILE.exists():
         with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
             tweets = json.load(f)
@@ -62,24 +62,24 @@ def cargar_tweets_existentes() -> tuple[list, set]:
 
 
 def guardar_tweets(tweets: list):
-    """Guarda todos los tweets en el archivo JSON."""
+    """Saves all the tweets to the JSON file."""
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(tweets, f, indent=2, ensure_ascii=False)
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 async def scrape_historico():
     """
-    Descarga todos los tweets disponibles de @AdamMancini4 usando Playwright.
+    Downloads every available tweet from @AdamMancini4 using Playwright.
 
-    El proceso de scroll:
-    - Cada vez que scrollas al fondo, Twitter hace una llamada UserTweets
-    - Playwright intercepta esa llamada y extrae los tweets
-    - Repetimos hasta que no haya tweets nuevos o lleguemos al límite
+    The scroll process:
+    - Each time you scroll to the bottom, Twitter makes a UserTweets call
+    - Playwright intercepts that call and extracts the tweets
+    - We repeat until there are no new tweets or we hit the limit
     """
     print("=" * 60)
     print("  Adam Mancini Bot — Tweet Scraper (Playwright)")
@@ -87,7 +87,7 @@ async def scrape_historico():
     print(f"🎯 Target: @{TWITTER_TARGET}")
     print(f"📁 Saving to: {OUTPUT_FILE}\n")
 
-    # Cargar tweets ya descargados
+    # Load already-downloaded tweets
     todos_tweets, ids_existentes = cargar_tweets_existentes()
     if todos_tweets:
         print(f"📂 Resuming: {len(todos_tweets)} tweets already downloaded\n")
@@ -99,8 +99,8 @@ async def scrape_historico():
         browser, context = await crear_contexto_con_cookies(p)
         page = await context.new_page()
 
-        # ── Interceptar respuestas de la API ──────────────────────────────
-        # Cada vez que Twitter devuelve tweets, los procesamos inmediatamente
+        # ── Intercept API responses ───────────────────────────────────────
+        # Each time Twitter returns tweets, we process them immediately
         async def procesar_respuesta(response):
             nonlocal nuevos_total, scrolls_sin_nuevos
 
@@ -114,7 +114,7 @@ async def scrape_historico():
                 nuevos_en_batch = 0
                 for tweet in tweets_batch:
                     if tweet['id'] and tweet['id'] not in ids_existentes:
-                        # Añadir metadatos de descarga
+                        # Add download metadata
                         tweet['scraped_at'] = datetime.now().isoformat()
                         todos_tweets.append(tweet)
                         ids_existentes.add(tweet['id'])
@@ -124,7 +124,7 @@ async def scrape_historico():
                 if nuevos_en_batch > 0:
                     print(f"  ✅ Batch: +{nuevos_en_batch} tweets | "
                           f"Total: {len(todos_tweets):,}")
-                    guardar_tweets(todos_tweets)  # Guardar después de cada batch
+                    guardar_tweets(todos_tweets)  # Save after each batch
                     scrolls_sin_nuevos = 0
                 else:
                     scrolls_sin_nuevos += 1
@@ -134,38 +134,38 @@ async def scrape_historico():
 
         page.on('response', procesar_respuesta)
 
-        # ── Cargar perfil ─────────────────────────────────────────────────
+        # ── Load profile ──────────────────────────────────────────────────
         print("🌐 Loading Adam Mancini's profile...")
         try:
             await page.goto(PROFILE_URL, wait_until='load', timeout=20000)
         except Exception:
-            pass  # El timeout de load es normal en Twitter
+            pass  # The load timeout is normal on Twitter
 
-        # Esperar a que carguen los primeros tweets
+        # Wait for the first tweets to load
         await page.wait_for_timeout(3000)
         print(f"📥 Starting scroll ({MAX_SCROLLS} max)...\n")
 
-        # ── Scroll automático ─────────────────────────────────────────────
+        # ── Automatic scroll ──────────────────────────────────────────────
         for scroll_num in range(MAX_SCROLLS):
 
-            # Parar si demasiados scrolls sin tweets nuevos
+            # Stop if too many scrolls with no new tweets
             if scrolls_sin_nuevos >= MAX_SIN_NUEVOS:
                 print(f"\n⏹️  {MAX_SIN_NUEVOS} scrolls with no new tweets — reached the end")
                 break
 
-            # Scroll al fondo de la página
-            # Esto hace que Twitter cargue el siguiente batch de tweets
+            # Scroll to the bottom of the page
+            # This makes Twitter load the next batch of tweets
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await page.wait_for_timeout(SCROLL_DELAY_MS)
 
-            # Mostrar progreso cada 10 scrolls
+            # Show progress every 10 scrolls
             if (scroll_num + 1) % 10 == 0:
                 print(f"  📜 Scroll {scroll_num + 1}/{MAX_SCROLLS} | "
                       f"Total accumulated: {len(todos_tweets):,}")
 
         await browser.close()
 
-    # ── Guardar resultado final ───────────────────────────────────────────
+    # ── Save the final result ─────────────────────────────────────────────
     guardar_tweets(todos_tweets)
 
     print("\n" + "=" * 60)
@@ -174,7 +174,7 @@ async def scrape_historico():
     print(f"🆕 New this session: {nuevos_total:,}")
 
     if todos_tweets:
-        # Estadísticas — datetime ya está importado al inicio del módulo
+        # Statistics — datetime is already imported at the top of the module
         def _parse(d):
             try: return datetime.strptime(d, '%a %b %d %H:%M:%S +0000 %Y')
             except: return datetime.min

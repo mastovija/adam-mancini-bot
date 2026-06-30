@@ -1,17 +1,17 @@
 """
-knowledge_base/processor.py — Extrae información de trading con Claude Haiku
+knowledge_base/processor.py — Extracts trading information with Claude Haiku
 =============================================================================
-Lee un artículo del newsletter y usa el LLM para extraer los datos
-estructurados que necesitamos: bias, niveles, setup del día.
+Reads a newsletter article and uses the LLM to extract the structured
+data we need: bias, levels, setup of the day.
 
-ESTRATEGIA DE EXTRACCIÓN:
-- Primeros 2000 chars → bias, contexto y análisis narrativo
-- Últimos 6000 chars  → sección Trade Plan con las listas de niveles
-  (Adam siempre escribe "Supports are: X, Y, Z" y "Resistances are: X, Y, Z"
-  al final del artículo. Con el límite antiguo de 1500 chars nunca llegábamos
-  a esta sección y extraíamos 0-3 niveles en vez de los 20-50 reales.)
+EXTRACTION STRATEGY:
+- First 2000 chars → bias, context and narrative analysis
+- Last 6000 chars  → Trade Plan section with the level lists
+  (Adam always writes "Supports are: X, Y, Z" and "Resistances are: X, Y, Z"
+  at the end of the article. With the old 1500-char limit we never reached
+  this section and extracted 0-3 levels instead of the real 20-50.)
 
-No llames esto directamente — lo usa build_kb.py y newsletter_parser.py
+Don't call this directly — it's used by build_kb.py and newsletter_parser.py
 """
 
 import json
@@ -26,7 +26,7 @@ from config import ANTHROPIC_API_KEY, LLM_MODEL
 
 
 # ─────────────────────────────────────────────
-# Prompt de extracción
+# Extraction prompt
 # ─────────────────────────────────────────────
 
 EXTRACTION_PROMPT = """Analyze this S&P 500/ES futures trading newsletter.
@@ -57,36 +57,36 @@ If a field does not appear: null for simple values, [] for lists."""
 
 
 # ─────────────────────────────────────────────
-# Función principal de extracción
+# Main extraction function
 # ─────────────────────────────────────────────
 
 def extract_trading_info(article: dict) -> dict:
     """
-    Usa Claude Haiku para extraer información estructurada de un artículo.
+    Uses Claude Haiku to extract structured information from an article.
 
-    Envía dos secciones del artículo al LLM:
-    - content_start: primeros 2000 chars para bias y contexto narrativo
-    - content_end:   últimos 6000 chars para los niveles del Trade Plan
+    Sends two sections of the article to the LLM:
+    - content_start: first 2000 chars for bias and narrative context
+    - content_end:   last 6000 chars for the Trade Plan levels
 
-    Esto resuelve el problema anterior donde el límite de 1500 chars
-    cortaba el artículo antes de llegar a la sección 'Supports are:'
-    y 'Resistances are:', que Adam siempre coloca al final.
+    This solves the previous problem where the 1500-char limit cut the
+    article off before reaching the 'Supports are:' and 'Resistances are:'
+    section, which Adam always places at the end.
 
     Args:
-        article: dict con 'title', 'published_at', 'content'
+        article: dict with 'title', 'published_at', 'content'
 
     Returns:
-        dict con bias, soportes, resistencias, nivel_critico, setup, invalida_si
-        En caso de error devuelve un dict vacío con valores por defecto.
+        dict with bias, soportes, resistencias, nivel_critico, setup, invalida_si
+        On error it returns an empty dict with default values.
     """
     client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     content = article.get('content', '')
 
-    # Primeros 2000 chars: contienen el análisis narrativo y el bias del día
+    # First 2000 chars: contain the narrative analysis and the day's bias
     content_start = content[:2000]
 
-    # Últimos 6000 chars: contienen el Trade Plan con las listas de niveles.
-    # Si el artículo es corto (preview) el contenido_end será vacío o idéntico al start.
+    # Last 6000 chars: contain the Trade Plan with the level lists.
+    # If the article is short (preview) content_end will be empty or identical to start.
     content_end = content[-6000:] if len(content) > 6000 else ''
 
     prompt = EXTRACTION_PROMPT.format(
@@ -99,27 +99,27 @@ def extract_trading_info(article: dict) -> dict:
     try:
         response = client.messages.create(
             model=LLM_MODEL,
-            max_tokens=1000,  # aumentado: necesitamos espacio para 20-50 niveles en el JSON
+            max_tokens=1000,  # increased: we need room for 20-50 levels in the JSON
             messages=[{"role": "user", "content": prompt}]
         )
 
         raw = response.content[0].text.strip()
 
-        # Limpiar markdown si el LLM lo añade a pesar de las instrucciones
+        # Strip markdown if the LLM adds it despite the instructions
         raw = re.sub(r'^```(?:json)?\s*', '', raw)
         raw = re.sub(r'\s*```$', '', raw)
 
         return json.loads(raw)
 
     except json.JSONDecodeError:
-        # LLM devolvió algo que no es JSON válido
+        # LLM returned something that is not valid JSON
         return _empty_trading_info()
     except Exception as e:
         raise RuntimeError(f"Error en API: {e}")
 
 
 def _empty_trading_info() -> dict:
-    """Valores por defecto cuando la extracción falla."""
+    """Default values when extraction fails."""
     return {
         "bias":           "unknown",
         "condicion_bias": None,

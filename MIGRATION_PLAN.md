@@ -84,15 +84,19 @@ Operator-facing `print(...)` / `logging` strings. Listed by print/log line weigh
 
 ---
 
-## TIER 4 — Code comments & docstrings (comment-dominant files)  🟢
+## TIER 4 — Code comments & docstrings (comment-dominant files)  🟢 — ✅ COMPLETE
 
 Files whose Spanish is almost entirely developer-facing.
 
-- [ ] **`knowledge_base/vectordb.py`** — *~34 lines* (docstrings/comments ~30, strings ~3)
-- [ ] **`parsers/playwright_utils.py`** — *~14 lines* (comments ~12, docstrings ~4)
-- [ ] **`clear_recent_slugs.py`** — *minimal* (small utility; spot-check comments, ~0–3 lines)
+**All Spanish code comments (`#…`) and docstrings (`"""…"""`) across the project are now English**, at the same explanatory detail level as before. Scope was strictly comments and docstrings — string literals, `print`/log/Telegram/prompt strings, exception messages, sample-data dicts, and variable/function/dict names (`señal`, `generar_señal_llm`, `tweets_hoy`, the `'soporte'/'resistencia'/'pivote'` literals in `backtester.py`, etc.) were left untouched. Section-divider banners (e.g. `# Función principal` → `# Main function`) were translated too. All 17 touched files pass `py_compile`.
 
-> Note: comment/docstring Spanish is also embedded in every Tier-1/2/3 file above — handle it in the same pass as that file rather than separately.
+- [x] **`knowledge_base/vectordb.py`** ✅ module/function docstrings + inline comments translated (ChromaDB `document_text` `Fecha:`/`Título:` data strings and dict keys left as-is)
+- [x] **`parsers/playwright_utils.py`** ✅ module docstring, cookie-normalization + tweet-extraction comments/docstrings translated
+- [x] **`clear_recent_slugs.py`** — no comments or docstrings present (only `print` strings, which are out of Tier-4 scope) — nothing to translate
+
+> Note: comment/docstring Spanish was also embedded in every Tier-1/2/3 file — handled in the same pass. Files touched in this tier: `knowledge_base/{vectordb,processor,build_kb,add_tweets_to_kb}.py`, `parsers/{playwright_utils,newsletter_parser,tweet_monitor}.py`, `scrapers/{substack_scraper,twitter_scraper,twitter_scraper_playwright}.py`, `market_data/{alpaca_feed,ibkr_feed}.py`, `bot/telegram_alerts.py`, `backtest/{download_data,backtester}.py`, `signals/signal_engine.py`, `main.py`.
+
+> **Out of scope, left Spanish (by instruction):** operator-facing `print`/log strings still in Spanish in `main.py`, `parsers/tweet_monitor.py`, and `signals/signal_engine.py` (Tier-3 residue for those three files); exception-message string literals (`ValueError`/`RuntimeError`); the `telegram_alerts.py` `__main__` sample-data dict values. `config.py` comments remain Tier 5.
 
 ---
 

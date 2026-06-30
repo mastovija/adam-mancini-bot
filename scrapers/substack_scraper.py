@@ -1,22 +1,22 @@
 """
-scrapers/substack_scraper.py - Descarga el newsletter Trade Companion
+scrapers/substack_scraper.py - Downloads the Trade Companion newsletter
 ======================================================================
-Scraper para tradecompanion.substack.com, el newsletter diario de Adam Mancini.
-Usa la API pública de Substack para listar artículos y requests/beautifulsoup
-para descargar el contenido de los artículos gratuitos.
+Scraper for tradecompanion.substack.com, Adam Mancini's daily newsletter.
+Uses Substack's public API to list articles and requests/beautifulsoup
+to download the content of the free articles.
 
-USO:
+USAGE:
     python scrapers/substack_scraper.py
 
-QUÉ HACE:
-    1. Obtiene el listado completo de artículos via API de Substack
-    2. Guarda el índice en data/raw/newsletter/index.json
-    3. Descarga el contenido completo de los artículos gratuitos
-    4. Para los de pago, guarda solo metadatos (título, fecha, extracto)
-    5. Cada artículo se guarda como un JSON individual
+WHAT IT DOES:
+    1. Gets the full list of articles via the Substack API
+    2. Saves the index to data/raw/newsletter/index.json
+    3. Downloads the full content of the free articles
+    4. For paid ones, saves only metadata (title, date, excerpt)
+    5. Each article is saved as an individual JSON
 
-COSTE: $0 — usa la API pública (no requiere suscripción para gratuitos)
-NOTA: Para artículos de pago, suscríbete y actualiza SUBSTACK_COOKIES en .env
+COST: $0 — uses the public API (no subscription required for free ones)
+NOTE: For paid articles, subscribe and update SUBSTACK_COOKIES in .env
 """
 
 import json
@@ -28,7 +28,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-# Añade la raíz del proyecto al path para importar config.py
+# Add the project root to the path to import config.py
 sys.path.append(str(Path(__file__).parent.parent))
 
 
@@ -36,9 +36,9 @@ from config import SUBSTACK_URL, NEWSLETTER_DIR, SUBSTACK_COOKIES
 
 
 # ─────────────────────────────────────────────
-# Constantes
+# Constants
 # ─────────────────────────────────────────────
-# Headers para parecer un navegador normal
+# Headers to look like a normal browser
 HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -48,10 +48,10 @@ HEADERS = {
     'Accept': 'application/json, text/html',
 }
 
-# Pausa entre requests para no sobrecargar el servidor
-DELAY_BETWEEN_REQUESTS = 1.5  # segundos
+# Pause between requests to avoid overloading the server
+DELAY_BETWEEN_REQUESTS = 1.5  # seconds
 
-# Artículos por página en la API de Substack
+# Articles per page in the Substack API
 BATCH_SIZE = 12
 PREVIEW_MAX_LENGTH = 500  # articles shorter than this are considered previews
 
@@ -76,18 +76,18 @@ def has_paid_access() -> bool:
     return bool(get_cookies_dict())
 
 # ─────────────────────────────────────────────
-# Fase 1: Obtener listado de artículos
+# Phase 1: Get the list of articles
 # ─────────────────────────────────────────────
 
 def get_all_post_metadata() -> list:
     """
-    Obtiene los metadatos de todos los artículos del newsletter
-    usando la API pública de Substack (/api/v1/archive).
+    Gets the metadata of every newsletter article using
+    Substack's public API (/api/v1/archive).
 
-    La API devuelve artículos en lotes de 12, ordenados por fecha.
-    Paginamos hasta que no haya más artículos.
+    The API returns articles in batches of 12, ordered by date.
+    We paginate until there are no more articles.
 
-    Devuelve: lista de dicts con id, title, slug, date, is_free
+    Returns: list of dicts with id, title, slug, date, is_free
     """
     print("📋 Fetching full list of articles...")
 
@@ -95,7 +95,7 @@ def get_all_post_metadata() -> list:
     offset    = 0
 
     while True:
-        # Endpoint público de Substack para listar artículos
+        # Substack's public endpoint for listing articles
         url = (f"{SUBSTACK_URL}/api/v1/archive"
                f"?sort=new&search=&offset={offset}&limit={BATCH_SIZE}")
 
@@ -108,10 +108,10 @@ def get_all_post_metadata() -> list:
             break
 
         if not batch:
-            break  # No hay más artículos
+            break  # No more articles
 
         for post in batch:
-            # 'audience': 'everyone' = gratuito, 'paid' = de pago
+            # 'audience': 'everyone' = free, 'paid' = paid
             is_free = post.get('audience') == 'everyone'
 
             all_posts.append({
@@ -119,14 +119,14 @@ def get_all_post_metadata() -> list:
                 'title':        post.get('title', ''),
                 'subtitle':     post.get('subtitle', ''),
                 'slug':         post.get('slug', ''),
-                'published_at': post.get('post_date', '')[:10],  # solo la fecha
+                'published_at': post.get('post_date', '')[:10],  # date only
                 'is_free':      is_free,
                 'url':          f"{SUBSTACK_URL}/p/{post.get('slug', '')}",
             })
 
         print(f"  Found: {len(all_posts)} articles...")
 
-        # Si la respuesta tiene menos del tamaño de página, ya no hay más
+        # If the response has fewer than a page's worth, there are no more
         if len(batch) < BATCH_SIZE:
             break
 
@@ -138,21 +138,21 @@ def get_all_post_metadata() -> list:
 
 
 # ─────────────────────────────────────────────
-# Fase 2: Descargar contenido de cada artículo
+# Phase 2: Download the content of each article
 # ─────────────────────────────────────────────
 
 def scrape_post_content(post: dict) -> dict:
     """
-    Descarga y extrae el texto completo de un artículo.
+    Downloads and extracts the full text of an article.
 
-    Para artículos gratuitos: extrae el contenido completo.
-    Para artículos de pago: solo guarda el preview visible.
+    For free articles: extracts the full content.
+    For paid articles: only saves the visible preview.
 
     Args:
-        post: dict con metadatos del artículo (de get_all_post_metadata)
+        post: dict with the article metadata (from get_all_post_metadata)
 
     Returns:
-        dict con todos los metadatos + el campo 'content' con el texto
+        dict with all the metadata + the 'content' field holding the text
     """
     cookies = get_cookies_dict()   # session cookie for paid content
     try:
@@ -168,35 +168,35 @@ def scrape_post_content(post: dict) -> dict:
 
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # ── Detectar paywall ──────────────────────────────────────────────────
-    # Substack añade clases específicas cuando el contenido requiere suscripción
+    # ── Detect paywall ────────────────────────────────────────────────────
+    # Substack adds specific classes when the content requires a subscription
     paywall_classes = ['paywall', 'subscribe-paywall', 'subscription-required']
     has_paywall = any(
         soup.find(attrs={'class': lambda c: c and any(p in str(c) for p in paywall_classes)})
-        for _ in [1]  # truco para hacer el any() más limpio
+        for _ in [1]  # trick to make the any() cleaner
     )
 
-    # ── Extraer el contenido del artículo ────────────────────────────────
-    # Substack ha cambiado su estructura HTML varias veces,
-    # probamos múltiples selectores para ser compatibles con versiones antiguas
+    # ── Extract the article content ──────────────────────────────────────
+    # Substack has changed its HTML structure several times,
+    # we try multiple selectors to stay compatible with older versions
     content_selectors = [
-        'div.available-content',          # versiones recientes
-        'div.body.markup',                # versiones anteriores
-        'div[class*="available-content"]', # variante con clase compuesta
-        'article',                         # fallback genérico
+        'div.available-content',          # recent versions
+        'div.body.markup',                # earlier versions
+        'div[class*="available-content"]', # variant with a compound class
+        'article',                         # generic fallback
     ]
 
     content_text = ''
     for selector in content_selectors:
         element = soup.select_one(selector)
         if element:
-            # get_text con '\n' como separador para mantener estructura de párrafos
+            # get_text with '\n' as the separator to keep paragraph structure
             content_text = element.get_text('\n', strip=True)
             break
 
-    # Previews: 900-2500 chars | Artículos completos: 5000-40000 chars
-    # No usamos has_paywall porque Substack muestra elementos de paywall
-    # incluso cuando el usuario está autenticado y tiene el contenido completo.
+    # Previews: 900-2500 chars | Full articles: 5000-40000 chars
+    # We don't use has_paywall because Substack shows paywall elements
+    # even when the user is authenticated and has the full content.
     is_complete = len(content_text) > 3000
 
     return {
@@ -211,19 +211,19 @@ def scrape_post_content(post: dict) -> dict:
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 def scrape_newsletter():
     """
-    Función principal que orquesta todo el proceso de scraping del newsletter.
+    Main function that orchestrates the whole newsletter scraping process.
 
-    Flujo completo:
-    1. Obtener lista de todos los artículos via API
-    2. Guardar índice completo en index.json
-    3. Descargar artículos gratuitos con contenido completo
-    4. Guardar metadatos de artículos de pago (para saber qué hay)
-    5. Cada artículo = un archivo JSON individual (slug.json)
+    Full flow:
+    1. Get the list of all articles via the API
+    2. Save the full index to index.json
+    3. Download free articles with full content
+    4. Save metadata for paid articles (to know what exists)
+    5. Each article = one individual JSON file (slug.json)
     """
     print("=" * 55)
     print("  Adam Mancini Bot — Newsletter Scraper")
@@ -231,30 +231,30 @@ def scrape_newsletter():
     print(f"🌐 URL: {SUBSTACK_URL}")
     print(f"📁 Saving to: {NEWSLETTER_DIR}\n")
 
-    # Crear directorio
+    # Create directory
     NEWSLETTER_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── 1. Obtener listado completo ───────────────────────────────────────
+    # ── 1. Get the full list ──────────────────────────────────────────────
     all_posts = get_all_post_metadata()
     if not all_posts:
         print("❌ No articles found. Is the URL in config.py correct?")
         return
 
-    # ── 2. Guardar índice ─────────────────────────────────────────────────
-    # El índice es útil para saber qué existe aunque no hayamos descargado el contenido
+    # ── 2. Save the index ─────────────────────────────────────────────────
+    # The index is useful to know what exists even if we haven't downloaded the content
     index_file = NEWSLETTER_DIR / 'index.json'
     with open(index_file, 'w', encoding='utf-8') as f:
         json.dump(all_posts, f, indent=2, ensure_ascii=False)
     print(f"📑 Index saved: {index_file}")
 
-    # ── 3. Estadísticas ───────────────────────────────────────────────────
+    # ── 3. Statistics ─────────────────────────────────────────────────────
     free_posts  = [p for p in all_posts if p['is_free']]
     paid_posts  = [p for p in all_posts if not p['is_free']]
     print(f"📊 Free articles: {len(free_posts)}")
     print(f"🔒 Paid articles: {len(paid_posts)}\n")
 
-    # ── 4. Filtrar los ya descargados ─────────────────────────────────────
-    # Leemos los slugs de los JSON ya existentes para no repetir trabajo
+    # ── 4. Filter out the already-downloaded ones ─────────────────────────
+    # We read the slugs of the existing JSONs so we don't repeat work
     existing_slugs = {f.stem for f in NEWSLETTER_DIR.glob('*.json')
                       if f.stem != 'index'}
 
@@ -294,7 +294,7 @@ def scrape_newsletter():
     print(f"🆕 To download: {len(to_download_free)} free, "
           f"{len(to_download_paid)} paid (metadata only)")
 
-    # ── 5. Descargar artículos gratuitos con contenido ────────────────────
+    # ── 5. Download free articles with content ────────────────────────────
     print("\n📥 Downloading free articles...")
     print("-" * 40)
 
@@ -308,12 +308,12 @@ def scrape_newsletter():
 
         article = scrape_post_content(post)
 
-        # Guardar como JSON con el slug como nombre de archivo
+        # Save as JSON with the slug as the filename
         output_file = NEWSLETTER_DIR / f"{post['slug']}.json"
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(article, f, indent=2, ensure_ascii=False)
 
-        # Informar resultado
+        # Report the result
         if article['scrape_status'] == 'ok':
             downloaded_ok += 1
             status = "✅ complete" if article.get('is_complete') else "⚠️  partial"
@@ -324,8 +324,8 @@ def scrape_newsletter():
 
         time.sleep(DELAY_BETWEEN_REQUESTS)
 
-    # ── 6. Guardar metadatos de artículos de pago ─────────────────────────
-    # Aunque no tenemos el contenido, guardamos los metadatos para saber qué existe
+    # ── 6. Save metadata for paid articles ────────────────────────────────
+    # Even though we don't have the content, we save the metadata to know what exists
     if to_download_paid:
         print(f"\n📥 Downloading preview of {len(to_download_paid)} paid articles...")
         print("-" * 40)
@@ -334,7 +334,7 @@ def scrape_newsletter():
             title_str = post['title'][:55] + ('...' if len(post['title']) > 55 else '')
             print(f"  [{i:4d}/{len(to_download_paid)}] {date_str} — {title_str}")
 
-            # Descargamos igual que los gratuitos — captura lo que sea visible
+            # We download the same way as the free ones — captures whatever is visible
             article = scrape_post_content(post)
             output_file = NEWSLETTER_DIR / f"{post['slug']}.json"
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -342,7 +342,7 @@ def scrape_newsletter():
 
             time.sleep(DELAY_BETWEEN_REQUESTS)
 
-    # ── Resumen final ─────────────────────────────────────────────────────
+    # ── Final summary ─────────────────────────────────────────────────────
     print("\n" + "=" * 55)
     print(f"✅ Scraping complete")
     print(f"📥 Downloaded with content: {downloaded_ok}")
@@ -358,7 +358,7 @@ def scrape_newsletter():
 
 
 # ─────────────────────────────────────────────
-# Punto de entrada
+# Entry point
 # ─────────────────────────────────────────────
 if __name__ == '__main__':
     scrape_newsletter()

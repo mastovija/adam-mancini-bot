@@ -1,16 +1,16 @@
 """
-knowledge_base/add_tweets_to_kb.py — Indexa tweets históricos en ChromaDB
+knowledge_base/add_tweets_to_kb.py — Indexes historical tweets in ChromaDB
 ==========================================================================
-Añade los tweets descargados de @AdamMancini4 a la base vectorial.
-Los tweets complementan los artículos del newsletter con perspectiva
-intradía y comentarios de mercado en tiempo real.
+Adds the tweets downloaded from @AdamMancini4 to the vector store.
+The tweets complement the newsletter articles with intraday perspective
+and real-time market commentary.
 
-USO:
+USAGE:
     python knowledge_base/add_tweets_to_kb.py
 
-Nota: los tweets son cortos (280 chars) así que NO usamos LLM para extraer
-info — directamente extraemos números (niveles) con regex y detectamos
-palabras clave de dirección. Más rápido y más barato.
+Note: tweets are short (280 chars) so we do NOT use the LLM to extract
+info — we extract numbers (levels) directly with regex and detect
+direction keywords. Faster and cheaper.
 """
 
 import json
@@ -26,36 +26,36 @@ from knowledge_base.vectordb import get_collection
 
 
 # ─────────────────────────────────────────────
-# Extracción simple de niveles sin LLM
+# Simple level extraction without the LLM
 # ─────────────────────────────────────────────
 
-# Palabras clave que indican dirección
+# Keywords that indicate direction
 PALABRAS_BULLISH  = ['long', 'bull', 'bullish', 'long here', 'buy', 'support', 'bounce', 'rally', 'upside', 'higher']
 PALABRAS_BEARISH  = ['short', 'bear', 'bearish', 'sell', 'resistance', 'breakdown', 'lower', 'downside', 'failed']
 
 
 def extraer_niveles(texto: str) -> list:
     """
-    Extrae números que parecen niveles de precio del ES (4000-9999).
-    Adam siempre menciona sus niveles como números: "7527 support", "7474 below".
+    Extracts numbers that look like ES price levels (4000-9999).
+    Adam always mentions his levels as numbers: "7527 support", "7474 below".
     """
     numeros = re.findall(r'\b(\d{4,5}(?:\.\d+)?)\b', texto)
     niveles = []
     for n in numeros:
         try:
             nivel = float(n)
-            # Rango válido para ES futures (evitar años, porcentajes, etc.)
+            # Valid range for ES futures (avoid years, percentages, etc.)
             if 3000 <= nivel <= 10000:
                 niveles.append(nivel)
         except ValueError:
             pass
-    return list(set(niveles))  # Eliminar duplicados
+    return list(set(niveles))  # Remove duplicates
 
 
 def detectar_bias(texto: str) -> str:
     """
-    Detecta el sesgo del tweet basándose en palabras clave.
-    Simple pero efectivo para tweets cortos de trading.
+    Detects the tweet's bias based on keywords.
+    Simple but effective for short trading tweets.
     """
     texto_lower = texto.lower()
 
@@ -72,20 +72,20 @@ def detectar_bias(texto: str) -> str:
 
 def tweet_es_relevante(tweet: dict) -> bool:
     """
-    Filtra tweets que no aportan información de trading.
-    Excluye: retweets, tweets muy cortos, respuestas sin niveles.
+    Filters out tweets that don't carry trading information.
+    Excludes: retweets, very short tweets, replies without levels.
     """
     texto = tweet.get('text', '')
 
-    # Excluir retweets
+    # Exclude retweets
     if texto.startswith('RT @'):
         return False
 
-    # Excluir tweets muy cortos (sin información de trading)
+    # Exclude very short tweets (no trading information)
     if len(texto) < 50:
         return False
 
-    # Solo incluir tweets que mencionen niveles de precio
+    # Only include tweets that mention price levels
     niveles = extraer_niveles(texto)
     if not niveles:
         return False
@@ -94,23 +94,23 @@ def tweet_es_relevante(tweet: dict) -> bool:
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 def add_tweets_to_kb():
     """
-    Lee todos los tweets descargados y los añade a ChromaDB.
+    Reads every downloaded tweet and adds them to ChromaDB.
 
-    Para cada tweet relevante:
-    1. Extrae niveles de precio con regex
-    2. Detecta bias con palabras clave
-    3. Añade a ChromaDB con metadatos para filtrado
+    For each relevant tweet:
+    1. Extracts price levels with regex
+    2. Detects bias with keywords
+    3. Adds to ChromaDB with metadata for filtering
     """
     print("=" * 55)
     print("  Adam Mancini Bot — Adding Tweets to ChromaDB")
     print("=" * 55)
 
-    # ── Cargar tweets ─────────────────────────────────────────────────────
+    # ── Load tweets ───────────────────────────────────────────────────────
     tweets_file = TWEETS_DIR / 'adam_mancini_tweets.json'
     if not tweets_file.exists():
         print("❌ No tweets found.")
@@ -122,13 +122,13 @@ def add_tweets_to_kb():
 
     print(f"📊 Tweets loaded: {len(todos_tweets)}")
 
-    # ── Inicializar ChromaDB ──────────────────────────────────────────────
+    # ── Initialize ChromaDB ───────────────────────────────────────────────
     print("📚 Connecting to ChromaDB...")
     collection = get_collection()
     print(f"   Current documents: {collection.count()}")
 
-    # ── Obtener IDs ya indexados ──────────────────────────────────────────
-    # Evitar duplicados si corremos el script varias veces
+    # ── Get already-indexed IDs ───────────────────────────────────────────
+    # Avoid duplicates if we run the script several times
     existentes = set()
     try:
         resultado = collection.get(include=[])
@@ -136,7 +136,7 @@ def add_tweets_to_kb():
     except Exception:
         pass
 
-    # ── Procesar e indexar tweets ─────────────────────────────────────────
+    # ── Process and index tweets ──────────────────────────────────────────
     print("\n📥 Indexing relevant tweets...")
     print("-" * 40)
 
@@ -147,12 +147,12 @@ def add_tweets_to_kb():
     for tweet in todos_tweets:
         tweet_id = f"tweet_{tweet.get('id', '')}"
 
-        # Saltar duplicados
+        # Skip duplicates
         if tweet_id in existentes:
             duplicados += 1
             continue
 
-        # Filtrar tweets sin información de trading
+        # Filter out tweets without trading information
         if not tweet_es_relevante(tweet):
             filtrados += 1
             continue
@@ -162,8 +162,8 @@ def add_tweets_to_kb():
         niveles = extraer_niveles(texto)
         bias    = detectar_bias(texto)
 
-        # ── Construir documento para ChromaDB ────────────────────────────
-        # Formato similar al de los artículos del newsletter
+        # ── Build the document for ChromaDB ──────────────────────────────
+        # Format similar to the newsletter articles
         doc_texto = (
             f"Fecha: {fecha}\n"
             f"Tipo: Tweet de Adam Mancini\n"
@@ -182,7 +182,7 @@ def add_tweets_to_kb():
             "setup":          texto[:200],
             "is_complete":    True,
             "content_length": len(texto),
-            "source":         "tweet",  # diferencia tweets de newsletter
+            "source":         "tweet",  # distinguishes tweets from newsletter
         }
 
         try:
@@ -199,7 +199,7 @@ def add_tweets_to_kb():
         except Exception as e:
             print(f"  ❌ Error: {e}")
 
-    # ── Resumen ───────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────
     print("\n" + "=" * 55)
     print(f"✅ Tweets indexed:  {indexados}")
     print(f"🔕 Filtered (no levels): {filtrados}")

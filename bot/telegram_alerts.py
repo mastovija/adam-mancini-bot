@@ -1,13 +1,13 @@
 """
-bot/telegram_alerts.py — Sistema de alertas por Telegram
+bot/telegram_alerts.py — Telegram alert system
 =========================================================
-Envía tres tipos de mensajes al móvil:
+Sends three types of messages to the phone:
 
-1. 📋 Briefing matutino  → resumen del newsletter de Adam al abrir mercado
-2. ⚡ Alerta de señal    → cuando el motor detecta un setup accionable
-3. 🐦 Tweet de Adam      → cuando Adam postea algo accionable en X
+1. 📋 Morning briefing  → summary of Adam's newsletter at market open
+2. ⚡ Signal alert       → when the engine detects an actionable setup
+3. 🐦 Adam's tweet       → when Adam posts something actionable on X
 
-USO (test rápido):
+USAGE (quick test):
     python bot/telegram_alerts.py
 """
 
@@ -39,9 +39,9 @@ except ImportError:
 
 def _format_levels(levels: list, max_show: int = 12) -> str:
     """
-    Formatea una lista de niveles para Telegram.
-    Limita a max_show niveles para no saturar el mensaje,
-    indicando cuántos quedan ocultos si hay más.
+    Formats a list of levels for Telegram.
+    Caps it at max_show levels to avoid cluttering the message,
+    noting how many are hidden if there are more.
     """
     if not levels:
         return ''
@@ -53,7 +53,7 @@ def _format_levels(levels: list, max_show: int = 12) -> str:
 
 
 def _fecha_legible(fecha_raw: str) -> str:
-    """Convierte '2026-06-09' en 'Tue 9 Jun'."""
+    """Converts '2026-06-09' into 'Tue 9 Jun'."""
     try:
         fecha_obj = datetime.strptime(fecha_raw, '%Y-%m-%d')
         dias  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -65,13 +65,13 @@ def _fecha_legible(fecha_raw: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# Clase principal
+# Main class
 # ─────────────────────────────────────────────
 
 class TelegramAlerter:
     """
-    Envía mensajes formateados al chat de Telegram configurado en .env.
-    Todos los métodos son async — úsalos con await.
+    Sends formatted messages to the Telegram chat configured in .env.
+    All methods are async — use them with await.
     """
 
     def __init__(self):
@@ -84,7 +84,7 @@ class TelegramAlerter:
         self.chat_id = TELEGRAM_CHAT_ID
 
     async def send(self, text: str, parse_mode: str = ParseMode.HTML):
-        """Envía un mensaje al chat configurado."""
+        """Sends a message to the configured chat."""
         try:
             await self.bot.send_message(
                 chat_id    = self.chat_id,
@@ -95,16 +95,16 @@ class TelegramAlerter:
             print(f"  ❌ Error Telegram: {e}")
 
     # ─────────────────────────────────────────────
-    # Tipo 1 — Briefing matutino
+    # Type 1 — Morning briefing
     # ─────────────────────────────────────────────
 
     async def send_morning_briefing(self, today: dict):
         """
-        Envía el resumen del newsletter al empezar el día.
+        Sends the newsletter summary at the start of the day.
 
-        Muestra hasta 12 soportes y 12 resistencias para no saturar
-        el mensaje (con nota "+N más" si hay más).
-        El texto de setup e invalida se muestra completo — sin cortes.
+        Shows up to 12 supports and 12 resistances to avoid cluttering
+        the message (with a "+N more" note if there are more).
+        The setup and invalidation text is shown in full — no truncation.
         """
         bias     = today.get('bias', 'unknown').upper()
         bias_emo = {'BULLISH': '🟢', 'BEARISH': '🔴', 'NEUTRAL': '⚪', 'MIXED': '🟡'}.get(bias, '❓')
@@ -112,11 +112,11 @@ class TelegramAlerter:
         fecha_str    = _fecha_legible(today.get('date', ''))
         titulo       = html.escape(today.get('title', '')[:70])
 
-        # Niveles — limitados a 12 por tipo para no saturar
+        # Levels — capped at 12 per type to avoid clutter
         soportes_str    = _format_levels(today.get('soportes', []),    max_show=12)
         resistencias_str = _format_levels(today.get('resistencias', []), max_show=12)
 
-        # Texto completo — sin cortes (Telegram admite hasta 4096 chars por mensaje)
+        # Full text — no truncation (Telegram allows up to 4096 chars per message)
         setup    = html.escape(today.get('setup')      or '')
         invalida = html.escape(today.get('invalida_si') or '')
 
@@ -150,18 +150,18 @@ class TelegramAlerter:
         await self.send('\n'.join(lineas))
 
     # ─────────────────────────────────────────────
-    # Tipo 2 — Alerta de señal del motor
+    # Type 2 — Engine signal alert
     # ─────────────────────────────────────────────
 
     async def send_signal_alert(self, señal: dict, precio_es: float, nivel: float, today: dict):
         """
-        Envía una alerta de trading cuando el motor detecta un setup.
+        Sends a trading alert when the engine detects a setup.
 
-        Usa señal['direccion'] (guardado por signal_engine.py) para
-        determinar LONG/SHORT — no lo deduce del texto de la razón,
-        que puede estar en español y ser poco fiable.
+        Uses señal['direccion'] (saved by signal_engine.py) to
+        determine LONG/SHORT — it doesn't infer it from the reason text,
+        which may be in Spanish and unreliable.
         """
-        # Dirección real desde signal_engine.py (no deducida del texto)
+        # Real direction from signal_engine.py (not inferred from the text)
         es_long  = señal.get('direccion', 'long') == 'long'
         dir_emo  = '🟢' if es_long else '🔴'
         dir_text = 'LONG' if es_long else 'SHORT'
@@ -172,7 +172,7 @@ class TelegramAlerter:
         t2      = señal.get('target2_es')
         conf    = señal.get('confianza', 0)
 
-        # Ratio R/R
+        # R/R ratio
         rr_str = ''
         if entrada and stop and t1:
             riesgo  = abs(float(entrada) - float(stop))
@@ -180,11 +180,11 @@ class TelegramAlerter:
             if riesgo > 0:
                 rr_str = f"📐 R/R:       1:{reward1/riesgo:.1f}\n"
 
-        # Hora EST
+        # EST time
         tz_ny = pytz.timezone(MARKET_TIMEZONE)
         hora  = datetime.now(tz_ny).strftime('%H:%M')
 
-        # Razón completa — sin cortes
+        # Full reason — no truncation
         razon = html.escape(señal.get('razon') or '')
 
         lineas = [
@@ -213,13 +213,13 @@ class TelegramAlerter:
         await self.send('\n'.join(lineas))
 
     # ─────────────────────────────────────────────
-    # Tipo 3 — Tweet nuevo de Adam
+    # Type 3 — New tweet from Adam
     # ─────────────────────────────────────────────
 
     async def send_tweet_alert(self, tweet: dict, clasificacion: dict):
         """
-        Envía alerta cuando Adam publica un tweet accionable.
-        Incluye el texto original + los niveles extraídos.
+        Sends an alert when Adam posts an actionable tweet.
+        Includes the original text + the extracted levels.
         """
         tipo    = clasificacion.get('tipo', 'comment')
         accion  = clasificacion.get('accionable', False)
@@ -270,14 +270,14 @@ class TelegramAlerter:
     # Test
     # ─────────────────────────────────────────────
 
-    # C-11: estos tres métodos completan la consolidación de alertas.
-    # signal_engine.py ya no necesita sus propias funciones formatear_alerta_*
-    # ni enviar_alerta — todo el formateo vive aquí, con HTML escapado.
+    # C-11: these three methods complete the alert consolidation.
+    # signal_engine.py no longer needs its own formatear_alerta_* functions
+    # or enviar_alerta — all formatting lives here, with escaped HTML.
 
     async def send_t1_alert(self, trade: dict, precio_es: float):
         """
-        T1 alcanzado — cerrar 75%, mover stop a breakeven, dejar runner.
-        Recibe el dict del trade activo tal como lo guarda signal_engine.py.
+        T1 reached — close 75%, move stop to breakeven, leave the runner.
+        Receives the active trade dict exactly as signal_engine.py saves it.
         """
         ganancia = precio_es - trade['entrada']
         t2_str   = str(int(trade['t2'])) if trade.get('t2') else 'max possible'
@@ -296,7 +296,7 @@ class TelegramAlerter:
 
     async def send_t2_alert(self, trade: dict, precio_es: float):
         """
-        T2 alcanzado — cerrar runner. Trade completado.
+        T2 reached — close the runner. Trade complete.
         """
         ganancia_runner = precio_es - trade['entrada']
         ganancia_t1     = trade['t1'] - trade['entrada']
@@ -312,7 +312,7 @@ class TelegramAlerter:
 
     async def send_stop_alert(self, trade: dict, precio_es: float):
         """
-        Stop hit — distingue stop original (pérdida) vs breakeven (runner).
+        Stop hit — distinguishes the original stop (loss) vs breakeven (runner).
         """
         if trade.get('t1_alcanzado'):
             ganancia_t1 = trade['t1'] - trade['entrada']
@@ -337,7 +337,7 @@ class TelegramAlerter:
             )
 
     async def send_test(self):
-        """Envía un mensaje de prueba para verificar la conexión."""
+        """Sends a test message to verify the connection."""
         tz_ny = pytz.timezone(MARKET_TIMEZONE)
         hora  = datetime.now(tz_ny).strftime('%H:%M EST')
         await self.send(
@@ -353,7 +353,7 @@ class TelegramAlerter:
 
 
 # ─────────────────────────────────────────────
-# Test desde línea de comandos
+# Command-line test
 # ─────────────────────────────────────────────
 
 async def main():

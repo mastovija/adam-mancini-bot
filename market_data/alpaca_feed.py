@@ -1,23 +1,23 @@
 """
-market_data/alpaca_feed.py — Feed de precios SPY con Alpaca Markets
+market_data/alpaca_feed.py — SPY price feed with Alpaca Markets
 ====================================================================
-Obtiene el precio de SPY en tiempo real usando la API gratuita de Alpaca.
-Mantenido como FALLBACK por si IBKR Gateway tiene problemas.
+Fetches the SPY price in real time using Alpaca's free API.
+Kept as a FALLBACK in case the IBKR Gateway has problems.
 
-PARA USAR ALPACA: cambiar DATA_SOURCE = 'alpaca' en config.py
+TO USE ALPACA: set DATA_SOURCE = 'alpaca' in config.py
 
-El feed IEX que usa la cuenta gratuita NO tiene 15 minutos de delay —
-es precio real pero solo cubre ~2-3% del volumen. Para detectar si el
-precio está cerca de un nivel de Adam (tolerancia de ±3 puntos ES),
-es completamente suficiente.
+The IEX feed used by the free account does NOT have a 15-minute delay —
+it's a real price but only covers ~2-3% of the volume. To detect whether
+the price is near one of Adam's levels (±3 ES points tolerance),
+it's completely sufficient.
 
-Si quieres datos SIP completos: Alpaca Basic ($9/mes)
+If you want full SIP data: Alpaca Basic ($9/month)
 
-ESTRUCTURA DE LO QUE DEVUELVE:
+STRUCTURE OF WHAT IT RETURNS:
     {
         "timestamp":     "2026-06-06T14:32:00",
         "spy_price":     540.27,
-        "es_equivalent": 5402.7,      ← SPY * 10 ≈ nivel ES que menciona Adam
+        "es_equivalent": 5402.7,      ← SPY * 10 ≈ the ES level Adam mentions
         "bar": {
             "open": 540.10, "high": 540.45,
             "low": 539.95,  "close": 540.27,
@@ -60,18 +60,18 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Horario de mercado
+# Market hours
 # ─────────────────────────────────────────────
 
 def is_market_open() -> bool:
     """
-    Comprueba si el mercado NYSE está abierto ahora mismo.
-    Horario: lunes-viernes, 7:30-16:00 EST (configurado en config.py)
+    Checks whether the NYSE market is open right now.
+    Hours: Monday-Friday, 7:30-16:00 EST (configured in config.py)
     """
     tz = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz)
 
-    if ahora.weekday() >= 5:  # sábado=5, domingo=6
+    if ahora.weekday() >= 5:  # Saturday=5, Sunday=6
         return False
 
     apertura = ahora.replace(
@@ -84,7 +84,7 @@ def is_market_open() -> bool:
 
 
 def tiempo_hasta_apertura() -> int:
-    """Devuelve los segundos hasta la próxima apertura del mercado."""
+    """Returns the seconds until the next market open."""
     tz = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz)
 
@@ -107,16 +107,16 @@ def tiempo_hasta_apertura() -> int:
 
 
 # ─────────────────────────────────────────────
-# Feed de precios SPY
+# SPY price feed
 # ─────────────────────────────────────────────
 
 class SPYFeed:
     """
-    Obtiene datos de precio de SPY desde Alpaca Markets.
-    Fallback cuando IBKR Gateway no está disponible.
+    Fetches SPY price data from Alpaca Markets.
+    Fallback when the IBKR Gateway is unavailable.
 
-    NOTA: get_bars() tiene versión ASYNC para compatibilidad con signal_engine,
-    que usa 'await self.feed.get_bars()' (requerido por ESFeed/IBKR).
+    NOTE: get_bars() has an ASYNC version for compatibility with signal_engine,
+    which uses 'await self.feed.get_bars()' (required by ESFeed/IBKR).
     """
 
     def __init__(self):
@@ -131,7 +131,7 @@ class SPYFeed:
         )
 
     def get_latest_bar(self) -> Optional[dict]:
-        """Obtiene la barra de 1 minuto más reciente de SPY."""
+        """Fetches the most recent 1-minute SPY bar."""
         try:
             request = StockLatestBarRequest(
                 symbol_or_symbols=MARKET_TICKER,
@@ -156,7 +156,7 @@ class SPYFeed:
             return None
 
     def get_recent_bars(self, n: int = 20) -> list:
-        """Obtiene las últimas N barras de 1 minuto de SPY."""
+        """Fetches the last N 1-minute SPY bars."""
         try:
             utc   = pytz.UTC
             start = datetime.now(utc) - timedelta(minutes=n + 10)
@@ -190,8 +190,8 @@ class SPYFeed:
 
     def _get_bars_sync(self, timeframe_minutes: int = 15, n: int = 10) -> list:
         """
-        Versión síncrona interna de get_bars.
-        Llamada desde el wrapper async get_bars() y desde get_snapshot().
+        Internal synchronous version of get_bars.
+        Called from the async get_bars() wrapper and from get_snapshot().
         """
         try:
             utc   = pytz.UTC
@@ -226,26 +226,26 @@ class SPYFeed:
 
     async def get_bars(self, timeframe_minutes: int = 15, n: int = 10) -> list:
         """
-        Versión ASYNC de get_bars — requerida por signal_engine que usa 'await'.
+        ASYNC version of get_bars — required by signal_engine which uses 'await'.
 
-        signal_engine llama 'await self.feed.get_bars()' porque ESFeed (IBKR)
-        necesita la versión async (usa reqHistoricalDataAsync internamente).
-        Este wrapper hace que SPYFeed sea compatible sin cambiar signal_engine.
+        signal_engine calls 'await self.feed.get_bars()' because ESFeed (IBKR)
+        needs the async version (it uses reqHistoricalDataAsync internally).
+        This wrapper makes SPYFeed compatible without changing signal_engine.
 
-        Alpaca usa requests HTTP síncronos, pero envolver la llamada en una
-        corutina la hace 'awaitable' sin ningún cambio de comportamiento real.
-        No bloquea el event loop porque la llamada HTTP es rápida (~200ms).
+        Alpaca uses synchronous HTTP requests, but wrapping the call in a
+        coroutine makes it 'awaitable' without any real behavior change.
+        It doesn't block the event loop because the HTTP call is fast (~200ms).
         """
         return self._get_bars_sync(timeframe_minutes, n)
 
     def spy_to_es(self, spy_price: float) -> float:
-        """Convierte precio de SPY a nivel ES (SPY * 10 ≈ ES)."""
+        """Converts a SPY price to an ES level (SPY * 10 ≈ ES)."""
         return round(spy_price * SPY_TO_ES_MULTIPLIER, 1)
 
     def get_snapshot(self) -> Optional[dict]:
         """
-        Obtiene todo lo necesario para el motor de señales en una sola llamada.
-        Incluye guarda anti-precio-obsoleto: más de 10 min → ignorar.
+        Gets everything the signal engine needs in a single call.
+        Includes a stale-price guard: older than 10 min → ignore.
         """
         bar = self.get_latest_bar()
         if not bar:
@@ -276,11 +276,11 @@ class SPYFeed:
 
 
 # ─────────────────────────────────────────────
-# Loop de polling (legacy)
+# Polling loop (legacy)
 # ─────────────────────────────────────────────
 
 async def run_market_loop(callback, interval_seconds: int = 60):
-    """Loop de mercado para uso externo con callback."""
+    """Market loop for external use with a callback."""
     feed = SPYFeed()
     print(f"📊 Market feed started | {MARKET_TICKER} every {interval_seconds}s")
 
@@ -301,13 +301,13 @@ async def run_market_loop(callback, interval_seconds: int = 60):
 
 
 # ─────────────────────────────────────────────
-# Test rápido
+# Quick test
 # ─────────────────────────────────────────────
 
 def test_feed():
     """
-    Prueba la conexión con Alpaca.
-    Ejecuta con: python market_data/alpaca_feed.py
+    Tests the connection with Alpaca.
+    Run with: python market_data/alpaca_feed.py
     """
     print("=" * 50)
     print("  Alpaca Feed Test — SPY (fallback)")

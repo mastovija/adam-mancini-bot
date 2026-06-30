@@ -1,10 +1,10 @@
 """
-parsers/playwright_utils.py — Utilidades compartidas para scraping con Playwright
+parsers/playwright_utils.py — Shared utilities for scraping with Playwright
 ==================================================================================
-Funciones reutilizadas por el scraper histórico y el monitor en tiempo real:
-- normalizar_cookies(): convierte formato Cookie-Editor al formato Playwright
-- extract_tweets(): parsea la respuesta GraphQL de Twitter y extrae tweets limpios
-- get_browser_context(): crea un contexto Playwright con las cookies cargadas
+Functions reused by the historical scraper and the real-time monitor:
+- normalizar_cookies(): converts Cookie-Editor format to Playwright format
+- extract_tweets(): parses Twitter's GraphQL response and extracts clean tweets
+- get_browser_context(): creates a Playwright context with the cookies loaded
 """
 
 import json
@@ -22,7 +22,7 @@ from config import RAW_DIR
 
 COOKIES_FILE = RAW_DIR / 'cookies.json'
 
-# Mapeo de valores sameSite de Cookie-Editor a los que acepta Playwright
+# Maps Cookie-Editor sameSite values to the ones Playwright accepts
 SAME_SITE_MAP = {
     'no_restriction': 'None',
     'lax':            'Lax',
@@ -34,10 +34,10 @@ SAME_SITE_MAP = {
 
 def normalizar_cookies(cookies_list: list) -> list:
     """
-    Convierte cookies exportadas de Cookie-Editor al formato que acepta Playwright.
+    Converts cookies exported from Cookie-Editor to the format Playwright accepts.
 
-    Cookie-Editor usa: sameSite = "no_restriction" | "lax" | "strict"
-    Playwright exige:  sameSite = "None" | "Lax" | "Strict"
+    Cookie-Editor uses: sameSite = "no_restriction" | "lax" | "strict"
+    Playwright requires: sameSite = "None" | "Lax" | "Strict"
     """
     resultado = []
     for c in cookies_list:
@@ -52,18 +52,18 @@ def normalizar_cookies(cookies_list: list) -> list:
                 str(c.get('sameSite', '')).lower(), 'None'
             ),
         }
-        # Cookie-Editor usa 'expirationDate', Playwright usa 'expires'
+        # Cookie-Editor uses 'expirationDate', Playwright uses 'expires'
         if c.get('expirationDate'):
             cookie['expires'] = float(c['expirationDate'])
 
-        if cookie['name']:  # Ignorar cookies sin nombre
+        if cookie['name']:  # Ignore cookies without a name
             resultado.append(cookie)
 
     return resultado
 
 
 def cargar_cookies() -> list:
-    """Carga y normaliza las cookies desde el archivo guardado."""
+    """Loads and normalizes the cookies from the saved file."""
     if not COOKIES_FILE.exists():
         raise FileNotFoundError(
             f"No se encontraron cookies en {COOKIES_FILE}\n"
@@ -74,27 +74,27 @@ def cargar_cookies() -> list:
 
 
 # ─────────────────────────────────────────────
-# Extracción de tweets del JSON de Twitter
+# Extracting tweets from Twitter's JSON
 # ─────────────────────────────────────────────
 
 def extract_tweets(api_response: dict) -> list:
     """
-    Extrae tweets de la respuesta GraphQL de UserTweets.
+    Extracts tweets from the UserTweets GraphQL response.
 
-    La estructura de Twitter es:
+    Twitter's structure is:
     data → user → result → timeline → timeline → instructions
     → entries → content → itemContent → tweet_results → result → legacy
 
     Args:
-        api_response: dict con la respuesta JSON de la API de Twitter
+        api_response: dict with the JSON response from Twitter's API
 
     Returns:
-        Lista de dicts con id, text, created_at, counts, is_retweet
+        List of dicts with id, text, created_at, counts, is_retweet
     """
     tweets = []
 
     try:
-        # Navegar hasta las instrucciones del timeline
+        # Navigate down to the timeline instructions
         instructions = (
             api_response['user']['result']['timeline']['timeline']['instructions']
         )
@@ -102,13 +102,13 @@ def extract_tweets(api_response: dict) -> list:
         return tweets
 
     for instruction in instructions:
-        # Solo procesamos las entradas que añaden tweets
+        # We only process the entries that add tweets
         if instruction.get('type') != 'TimelineAddEntries':
             continue
 
         for entry in instruction.get('entries', []):
             try:
-                # Cada entrada puede ser un tweet, un cursor de paginación, etc.
+                # Each entry can be a tweet, a pagination cursor, etc.
                 tweet_result = (
                     entry['content']['itemContent']['tweet_results']['result']
                 )
@@ -129,7 +129,7 @@ def extract_tweets(api_response: dict) -> list:
                     'is_retweet':    text.startswith('RT @'),
                 })
             except (KeyError, TypeError):
-                # Esta entrada no es un tweet (cursor, separador, etc.)
+                # This entry is not a tweet (cursor, separator, etc.)
                 continue
 
     return tweets
@@ -150,8 +150,8 @@ async def crear_contexto_con_cookies(playwright):
     cookies = cargar_cookies()
     await context.add_cookies(cookies)
 
-    # ── Anti-detección ────────────────────────────────────────────────────
-    # Sin esto Twitter sirve contenido cacheado a navegadores automatizados
+    # ── Anti-detection ────────────────────────────────────────────────────
+    # Without this, Twitter serves cached content to automated browsers
     await context.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         window.chrome = {runtime: {}};

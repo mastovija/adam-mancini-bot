@@ -1,26 +1,26 @@
 """
-parsers/newsletter_parser.py — Parser del newsletter diario de Adam Mancini
+parsers/newsletter_parser.py — Parser for Adam Mancini's daily newsletter
 =============================================================================
-Cada mañana descarga el artículo más reciente de Trade Companion
-(tradecompanion.substack.com), extrae el mapa del día con Claude Haiku
-y guarda el resultado en data/daily/today.json.
+Every morning it downloads the most recent Trade Companion article
+(tradecompanion.substack.com), extracts the day map with Claude Haiku
+and saves the result to data/daily/today.json.
 
-Este archivo es lo que el motor de señales (Fase 5) consulta durante
-toda la sesión para saber el bias, los niveles clave y las condiciones.
+This file is what the signal engine (Phase 5) consults throughout the
+whole session to know the bias, the key levels and the conditions.
 
-CAMPOS CLAVE en today.json:
-  - soportes, resistencias, nivel_critico, bias: extraídos por Haiku
-  - content_plan: últimos 8000 chars del artículo = sección Trade Plan
-    (contiene "I'd bid direct", "Bull/Bear case", contexto de niveles)
-    Este es el campo más importante — el motor de señales lo pasa completo al LLM.
+KEY FIELDS in today.json:
+  - soportes, resistencias, nivel_critico, bias: extracted by Haiku
+  - content_plan: last 8000 chars of the article = Trade Plan section
+    (contains "I'd bid direct", "Bull/Bear case", level context)
+    This is the most important field — the signal engine passes it whole to the LLM.
 
-USO manual:
+Manual usage:
     python parsers/newsletter_parser.py
 
-Con --force re-parsea aunque ya exista el de hoy:
+With --force it re-parses even if today's already exists:
     python parsers/newsletter_parser.py --force
 
-USO automático: llamado por el scheduler a las 7:30 AM EST
+Automatic usage: called by the scheduler at 7:30 AM EST
 """
 
 import json
@@ -37,7 +37,7 @@ from knowledge_base.processor import extract_trading_info
 
 
 # ─────────────────────────────────────────────
-# Rutas de archivos
+# File paths
 # ─────────────────────────────────────────────
 DAILY_DIR   = DATA_DIR / 'daily'
 TODAY_FILE  = DAILY_DIR / 'today.json'
@@ -45,13 +45,13 @@ HISTORY_DIR = DAILY_DIR / 'history'
 
 
 # ─────────────────────────────────────────────
-# Cookies de suscripción de pago
+# Paid subscription cookies
 # ─────────────────────────────────────────────
 
 def get_substack_cookies() -> dict:
     """
-    Parsea SUBSTACK_COOKIES del .env a un dict para requests.
-    Con substack.sid, Substack sirve el artículo completo (30,000+ chars).
+    Parses SUBSTACK_COOKIES from .env into a dict for requests.
+    With substack.sid, Substack serves the full article (30,000+ chars).
     """
     cookies = {}
     if not SUBSTACK_COOKIES:
@@ -65,11 +65,11 @@ def get_substack_cookies() -> dict:
 
 
 # ─────────────────────────────────────────────
-# Obtener el artículo más reciente
+# Get the most recent article
 # ─────────────────────────────────────────────
 
 def get_latest_article() -> dict | None:
-    """Consulta la API pública de Substack para el artículo más reciente."""
+    """Queries Substack's public API for the most recent article."""
     try:
         url = f"{SUBSTACK_URL}/api/v1/archive?sort=new&offset=0&limit=1"
         r   = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -95,8 +95,8 @@ def get_latest_article() -> dict | None:
 
 def scrape_article_content(url: str) -> str:
     """
-    Descarga el contenido completo del artículo usando las cookies de suscripción.
-    Sin cookies solo obtiene el preview (2,000-3,000 chars).
+    Downloads the full article content using the subscription cookies.
+    Without cookies it only gets the preview (2,000-3,000 chars).
     """
     cookies = get_substack_cookies()
 
@@ -134,23 +134,23 @@ def scrape_article_content(url: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# Guardar el mapa del día
+# Save the day map
 # ─────────────────────────────────────────────
 
 def guardar_mapa_dia(article: dict, trading_info: dict, content: str) -> dict:
     """
-    Construye y guarda el mapa del día en dos sitios:
-    - data/daily/today.json              → sobreescrito cada día (motor lo lee aquí)
-    - data/daily/history/YYYY-MM-DD.json → copia histórica permanente
+    Builds and saves the day map in two places:
+    - data/daily/today.json              → overwritten each day (the engine reads it here)
+    - data/daily/history/YYYY-MM-DD.json → permanent historical copy
 
-    El campo más importante es 'content_plan': los últimos 8000 chars del
-    artículo, que corresponden a la sección "Trade Plan" donde Adam escribe:
-    - "In terms of lvls I'd bid direct:" (los niveles realmente accionables)
+    The most important field is 'content_plan': the last 8000 chars of the
+    article, which correspond to the "Trade Plan" section where Adam writes:
+    - "In terms of lvls I'd bid direct:" (the actually actionable levels)
     - "Bull case tomorrow:" / "Bear case tomorrow:"
-    - Contexto específico de cada nivel ("tested to death", "obvious FB", etc.)
+    - Specific context for each level ("tested to death", "obvious FB", etc.)
 
-    El motor de señales pasa este texto completo al LLM para que tome
-    decisiones con las palabras exactas de Adam, no solo con listas de números.
+    The signal engine passes this full text to the LLM so it makes
+    decisions with Adam's exact words, not just with lists of numbers.
     """
     DAILY_DIR.mkdir(parents=True, exist_ok=True)
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -162,7 +162,7 @@ def guardar_mapa_dia(article: dict, trading_info: dict, content: str) -> dict:
         'is_complete':    len(content) > 5000,
         'parsed_at':      datetime.now().isoformat(),
 
-        # Campos extraídos por Haiku (niveles estructurados)
+        # Fields extracted by Haiku (structured levels)
         'bias':           trading_info.get('bias', 'unknown'),
         'condicion_bias': trading_info.get('condicion_bias'),
         'nivel_critico':  trading_info.get('nivel_critico'),
@@ -171,8 +171,8 @@ def guardar_mapa_dia(article: dict, trading_info: dict, content: str) -> dict:
         'setup':          trading_info.get('setup'),
         'invalida_si':    trading_info.get('invalida_si'),
 
-        # Artículo completo — el LLM lo lee entero para entender el plan de Adam
-        # Coste: ~$0.007 por llamada al LLM, solo cuando el precio toca un nivel
+        # Full article — the LLM reads it whole to understand Adam's plan
+        # Cost: ~$0.007 per LLM call, only when the price touches a level
         'content_plan':   content,
     }
 
@@ -187,19 +187,19 @@ def guardar_mapa_dia(article: dict, trading_info: dict, content: str) -> dict:
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 def parse_daily_newsletter(force: bool = False) -> dict | None:
     """
-    Descarga y parsea el newsletter más reciente de Adam Mancini.
+    Downloads and parses Adam Mancini's most recent newsletter.
 
-    Flujo:
-    1. Comprueba si ya tenemos el mapa de hoy (evita reprocesar)
-    2. Obtiene el artículo más reciente de Substack
-    3. Descarga el contenido completo (con cookies de suscripción)
-    4. Extrae bias y niveles con Claude Haiku
-    5. Guarda en data/daily/today.json con content_plan completo
+    Flow:
+    1. Checks whether we already have today's map (avoids reprocessing)
+    2. Gets the most recent article from Substack
+    3. Downloads the full content (with subscription cookies)
+    4. Extracts bias and levels with Claude Haiku
+    5. Saves to data/daily/today.json with the full content_plan
     """
     print("=" * 55)
     print("  Adam Mancini Bot — Newsletter Parser")
@@ -259,7 +259,7 @@ def parse_daily_newsletter(force: bool = False) -> dict | None:
 
 
 def _mostrar_resumen(mapa: dict):
-    """Muestra el mapa del día de forma legible en consola."""
+    """Shows the day map in a readable form in the console."""
     print()
     print("┌─ DAY MAP " + "─" * 43)
     print(f"│ Date:          {mapa.get('date', '?')}")
@@ -293,7 +293,7 @@ def _mostrar_resumen(mapa: dict):
 
 
 # ─────────────────────────────────────────────
-# Punto de entrada
+# Entry point
 # ─────────────────────────────────────────────
 
 if __name__ == '__main__':

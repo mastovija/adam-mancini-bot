@@ -1,18 +1,18 @@
 """
-main.py — Punto de entrada del Bot Adam Mancini
+main.py — Entry point of the Adam Mancini Bot
 ================================================
-Arranca todos los módulos del bot con un solo comando:
+Starts every bot module with a single command:
     python main.py
 
-QUÉ HACE AL INICIAR:
-    1. Parsea el newsletter de hoy (si no está ya hecho)
-    2. Envía el briefing matutino a Telegram
-    3. Arranca el motor de señales (cada 60 segundos)
-    4. Arranca el monitor de tweets (cada 3 minutos)
-    5. Programa el parseo diario del newsletter a las 7:30 AM EST
+WHAT IT DOES ON STARTUP:
+    1. Parses today's newsletter (if not already done)
+    2. Sends the morning briefing to Telegram
+    3. Starts the signal engine (every 60 seconds)
+    4. Starts the tweet monitor (every 3 minutes)
+    5. Schedules the daily newsletter parse at 7:30 AM EST
 
-TODO CORRE EN PARALELO — un solo proceso, un solo comando.
-Para parar: Ctrl+C (envía aviso de apagado a Telegram)
+EVERYTHING RUNS IN PARALLEL — a single process, a single command.
+To stop: Ctrl+C (sends a shutdown notice to Telegram)
 """
 
 import asyncio
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytz
 
-# Añadir raíz al path
+# Add the root to the path
 sys.path.append(str(Path(__file__).parent))
 
 from config import MARKET_TIMEZONE
@@ -42,24 +42,24 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Tareas programadas
+# Scheduled tasks
 # ─────────────────────────────────────────────
 
 async def tarea_newsletter_diario():
     """
-    Se ejecuta cada día a las 7:30 AM EST (lun-vie).
-    Descarga el newsletter de hoy y envía el briefing matutino a Telegram.
+    Runs every day at 7:30 AM EST (Mon-Fri).
+    Downloads today's newsletter and sends the morning briefing to Telegram.
 
-    FIX B-9 — doble briefing:
-    Si el bot arracó poco antes de las 7:30 AM (caso típico: arrancas a
-    las 7:15-7:25 EST), inicializar() ya habrá parseado el newsletter y
-    enviado el briefing. Sin esta guarda, el scheduler disparaba igualmente
-    a las 7:30 y mandaba un segundo briefing idéntico a Telegram.
+    FIX B-9 — double briefing:
+    If the bot started shortly before 7:30 AM (typical case: you start at
+    7:15-7:25 EST), inicializar() will already have parsed the newsletter
+    and sent the briefing. Without this guard, the scheduler would still
+    fire at 7:30 and send a second identical briefing to Telegram.
 
-    Solución: si today.json fue modificado hace menos de GRACE_MINUTES,
-    inicializar() ya lo hizo — saltamos este ciclo.
+    Solution: if today.json was modified less than GRACE_MINUTES ago,
+    inicializar() already did it — we skip this cycle.
     """
-    GRACE_MINUTES = 20   # ventana de gracia: si el archivo tiene <20 min, ya está hecho
+    GRACE_MINUTES = 20   # grace window: if the file is <20 min old, it's already done
 
     from config import DATA_DIR
     today_file = DATA_DIR / 'daily' / 'today.json'
@@ -83,20 +83,20 @@ async def tarea_newsletter_diario():
             await alerter.send("⚠️ Could not fetch today's newsletter")
     except Exception as e:
         print(f"❌ Error en tarea newsletter: {e}")
-        # parse_mode=None: este aviso es texto plano (sin etiquetas HTML) y la excepción {e}
-        # puede traer <, > o & (rutas, URLs con &, fragmentos del scrape). Sin esto, ese
-        # carácter rompería el parser HTML de Telegram y el aviso de error se perdería.
+        # parse_mode=None: this notice is plain text (no HTML tags) and the exception {e}
+        # may contain <, > or & (paths, URLs with &, scrape fragments). Without this, that
+        # character would break Telegram's HTML parser and the error notice would be lost.
         await alerter.send(f"❌ Newsletter error: {e}", parse_mode=None)
 
 
 # ─────────────────────────────────────────────
-# Inicialización
+# Initialization
 # ─────────────────────────────────────────────
 
 async def inicializar():
     """
-    Tareas de inicio: parsear newsletter, enviar briefing, verificar conexiones.
-    Se ejecuta una sola vez al arrancar el bot.
+    Startup tasks: parse newsletter, send briefing, verify connections.
+    Runs only once when the bot starts.
     """
     alerter = TelegramAlerter()
     tz_ny   = pytz.timezone(MARKET_TIMEZONE)
@@ -104,7 +104,7 @@ async def inicializar():
 
     print("\n🚀 Iniciando Bot Adam Mancini...")
 
-    # ── 1. Parsear newsletter ─────────────────────────────────────────────
+    # ── 1. Parse newsletter ───────────────────────────────────────────────
     print("📰 Parseando newsletter...")
     try:
         today = parse_daily_newsletter()
@@ -112,7 +112,7 @@ async def inicializar():
         print(f"  ⚠️  Error newsletter: {e}")
         today = None
 
-    # ── 2. Briefing matutino a Telegram ───────────────────────────────────
+    # ── 2. Morning briefing to Telegram ───────────────────────────────────
     try:
         if today:
             await alerter.send_morning_briefing(today)
@@ -136,25 +136,25 @@ async def inicializar():
 
 async def main():
     """
-    Función principal que corre todo el bot en paralelo.
+    Main function that runs the whole bot in parallel.
 
-    Usa asyncio.gather para ejecutar concurrentemente:
-    - Motor de señales (checks cada 60 segundos)
-    - Monitor de tweets (checks cada 3 minutos)
+    Uses asyncio.gather to run concurrently:
+    - Signal engine (checks every 60 seconds)
+    - Tweet monitor (checks every 3 minutes)
 
-    El scheduler añade el parseo diario del newsletter a las 7:30 AM.
+    The scheduler adds the daily newsletter parse at 7:30 AM.
     """
 
-    # ── Inicialización ────────────────────────────────────────────────────
+    # ── Initialization ────────────────────────────────────────────────────
     await inicializar()
 
-    # ── Scheduler diario ──────────────────────────────────────────────────
+    # ── Daily scheduler ───────────────────────────────────────────────────
     scheduler = None
     if HAS_SCHEDULER:
         tz_ny     = pytz.timezone(MARKET_TIMEZONE)
         scheduler = AsyncIOScheduler(timezone=tz_ny)
 
-        # Newsletter: cada día laborable a las 7:30 AM EST
+        # Newsletter: every weekday at 7:30 AM EST
         scheduler.add_job(
             tarea_newsletter_diario,
             trigger     = 'cron',
@@ -167,7 +167,7 @@ async def main():
         scheduler.start()
         print("⏰ Scheduler activo: newsletter a las 7:30 AM EST (lun-vie)")
 
-    # ── Módulos en paralelo ───────────────────────────────────────────────
+    # ── Modules in parallel ───────────────────────────────────────────────
     print("\n▶️  Arrancando módulos:")
     print("   • Motor de señales (cada 60s)")
     print("   • Monitor de tweets (cada 3 min)")
@@ -176,7 +176,7 @@ async def main():
     engine = SignalEngine()
 
     try:
-        # Ejecutar señal engine y tweet monitor concurrentemente
+        # Run the signal engine and tweet monitor concurrently
         await asyncio.gather(
             engine.run_loop(interval_seconds=60),
             monitorizar(),
@@ -188,21 +188,21 @@ async def main():
             try:
                 scheduler.shutdown(wait=False)
             except Exception:
-                pass  # El event loop ya está cerrado — error cosmético, no afecta al funcionamiento
+                pass  # The event loop is already closed — cosmetic error, doesn't affect behavior
 
 
 # ─────────────────────────────────────────────
-# Manejo de apagado limpio
+# Clean shutdown handling
 # ─────────────────────────────────────────────
 
 def handle_shutdown(loop, alerter):
     """
-    Apagado limpio con Ctrl+C.
+    Clean shutdown with Ctrl+C.
 
-    FIX: no se puede llamar a run_until_complete() sobre un loop que ya
-    está corriendo (lanza RuntimeError y el aviso nunca se enviaba).
-    En su lugar, programamos el envío como tarea dentro del loop activo
-    y paramos el loop cuando termine.
+    FIX: you can't call run_until_complete() on a loop that is already
+    running (it raises RuntimeError and the notice was never sent).
+    Instead, we schedule the send as a task inside the active loop
+    and stop the loop when it finishes.
     """
     print("\n⏹️  Apagando bot...")
 
@@ -210,15 +210,15 @@ def handle_shutdown(loop, alerter):
         try:
             await alerter.send("⏹️ <b>Adam Mancini Bot stopped</b>")
         except Exception:
-            pass  # Si Telegram falla, paramos igualmente
+            pass  # If Telegram fails, we stop anyway
         loop.stop()
 
-    # create_task: se ejecuta dentro del loop que ya está corriendo
+    # create_task: runs inside the loop that is already running
     loop.create_task(_despedida_y_stop())
 
 
 # ─────────────────────────────────────────────
-# Entrada
+# Entry point
 # ─────────────────────────────────────────────
 
 if __name__ == '__main__':
@@ -231,14 +231,14 @@ if __name__ == '__main__':
     asyncio.set_event_loop(loop)
     alerter = TelegramAlerter()
 
-    # Capturar Ctrl+C para apagado limpio
+    # Capture Ctrl+C for a clean shutdown
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, handle_shutdown, loop, alerter)
 
     try:
         loop.run_until_complete(main())
     except RuntimeError:
-        pass  # Loop detenido por el signal handler
+        pass  # Loop stopped by the signal handler
     finally:
         loop.close()
         print("👋 Bot detenido")

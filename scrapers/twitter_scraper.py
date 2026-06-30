@@ -1,21 +1,21 @@
 """
-scrapers/twitter_scraper.py - Descarga tweets históricos de Adam Mancini
+scrapers/twitter_scraper.py - Downloads Adam Mancini's historical tweets
 =========================================================================
-Versión 3: usa cookies del navegador directamente, sin login programático.
-Esto evita el bloqueo de Cloudflare que afecta al login automático.
+Version 3: uses browser cookies directly, without programmatic login.
+This avoids the Cloudflare block that affects automatic login.
 
-SETUP (solo la primera vez):
-    1. Instala "Cookie-Editor" en Chrome (extensión gratuita)
-    2. Ve a x.com con tu sesión iniciada
-    3. Clic en Cookie-Editor → Export → Export as JSON
-    4. Guarda el texto en: data/raw/cookies.json
+SETUP (first time only):
+    1. Install "Cookie-Editor" in Chrome (free extension)
+    2. Go to x.com while logged in
+    3. Click Cookie-Editor → Export → Export as JSON
+    4. Save the text to: data/raw/cookies.json
 
-USO:
+USAGE:
     python scrapers/twitter_scraper.py
 """
-# ── Patch completo: reemplaza el objeto de transacción entero ─────────
+# ── Full patch: replaces the entire transaction object ────────────────
 class _NullTransaction:
-    """Transacción vacía que evita todos los errores de KEY_BYTE."""
+    """Empty transaction that avoids all KEY_BYTE errors."""
     def __init__(self):
         self.DEFAULT_ROW_INDEX = 2
         self.DEFAULT_KEY_BYTES_INDICES = [15, 5, 2, 0]
@@ -23,10 +23,10 @@ class _NullTransaction:
         self.home_page_response = ''
 
     async def init(self, *args, **kwargs):
-        pass  # no hace nada, evita todos los errores de parsing
+        pass  # does nothing, avoids all parsing errors
 
     def __getattr__(self, name):
-        # Cualquier método desconocido devuelve una función vacía
+        # Any unknown method returns an empty function
         def _noop(*args, **kwargs):
             return ''
         return _noop
@@ -36,10 +36,10 @@ _orig_client_init = _TwikitClient.__init__
 
 def _patched_client_init(self, *args, **kwargs):
     _orig_client_init(self, *args, **kwargs)
-    self.client_transaction = _NullTransaction()  # reemplaza después de crear
+    self.client_transaction = _NullTransaction()  # replace after creation
 
 _TwikitClient.__init__ = _patched_client_init
-# ── Fin del patch ─────────────────────────────────────────────────────
+# ── End of patch ──────────────────────────────────────────────────────
 
 import asyncio
 import json
@@ -63,21 +63,21 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Rutas de archivos
+# File paths
 # ─────────────────────────────────────────────
-COOKIES_FILE = RAW_DIR / 'cookies.json'     # cookies exportadas del navegador
+COOKIES_FILE = RAW_DIR / 'cookies.json'     # cookies exported from the browser
 OUTPUT_FILE  = TWEETS_DIR / 'adam_mancini_tweets.json'
 
-# Pausa entre páginas para no activar rate limits (segundos)
+# Pause between pages to avoid triggering rate limits (seconds)
 DELAY_BETWEEN_PAGES = 3
 
 
 # ─────────────────────────────────────────────
-# Funciones de utilidad
+# Utility functions
 # ─────────────────────────────────────────────
 
 def load_existing_tweets() -> list:
-    """Carga tweets ya descargados para no repetir trabajo."""
+    """Loads already-downloaded tweets so we don't repeat work."""
     if OUTPUT_FILE.exists():
         with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -85,7 +85,7 @@ def load_existing_tweets() -> list:
 
 
 def save_tweets(tweets: list):
-    """Guarda la lista de tweets en JSON."""
+    """Saves the list of tweets to JSON."""
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(tweets, f, indent=2, ensure_ascii=False)
@@ -93,9 +93,9 @@ def save_tweets(tweets: list):
 
 def load_browser_cookies(client: Client):
     """
-    Carga las cookies exportadas desde el navegador.
-    Cookie-Editor exporta una lista de objetos con 'name' y 'value'.
-    Las convertimos al formato que twikit entiende.
+    Loads the cookies exported from the browser.
+    Cookie-Editor exports a list of objects with 'name' and 'value'.
+    We convert them to the format twikit understands.
     """
     if not COOKIES_FILE.exists():
         print(f"❌ Cookies file not found: {COOKIES_FILE}")
@@ -110,31 +110,31 @@ def load_browser_cookies(client: Client):
     with open(COOKIES_FILE, 'r', encoding='utf-8') as f:
         cookies_data = json.load(f)
 
-    # Cookie-Editor puede exportar como lista de objetos o como dict
-    # Manejamos ambos formatos
+    # Cookie-Editor can export as a list of objects or as a dict
+    # We handle both formats
     if isinstance(cookies_data, list):
-        # Formato Cookie-Editor: [{"name": "auth_token", "value": "xxx", ...}, ...]
+        # Cookie-Editor format: [{"name": "auth_token", "value": "xxx", ...}, ...]
         cookie_dict = {c['name']: c['value'] for c in cookies_data if 'name' in c}
     elif isinstance(cookies_data, dict):
-        # Formato simple: {"auth_token": "xxx", ...}
+        # Simple format: {"auth_token": "xxx", ...}
         cookie_dict = cookies_data
     else:
         print("❌ Unrecognized cookie format")
         return False
 
-    # Verificar que tiene las cookies esenciales de Twitter
+    # Verify it has Twitter's essential cookies
     if 'auth_token' not in cookie_dict:
         print("❌ The cookies do not contain 'auth_token'")
         print("   Make sure to export the cookies from x.com (not twitter.com)")
         return False
 
-    # Cargar las cookies en el cliente twikit
+    # Load the cookies into the twikit client
     client.http.cookies.update(cookie_dict)
     return True
 
 
 def tweet_to_dict(tweet) -> dict:
-    """Convierte un Tweet de twikit a diccionario serializable."""
+    """Converts a twikit Tweet to a serializable dictionary."""
     return {
         'id':             tweet.id,
         'text':           tweet.text,
@@ -149,13 +149,13 @@ def tweet_to_dict(tweet) -> dict:
 
 
 # ─────────────────────────────────────────────
-# Función principal
+# Main function
 # ─────────────────────────────────────────────
 
 async def scrape_adam_tweets():
     """
-    Descarga los tweets de @AdamMancini4 usando cookies del navegador.
-    Sin login programático → sin bloqueo de Cloudflare.
+    Downloads @AdamMancini4's tweets using browser cookies.
+    No programmatic login → no Cloudflare block.
     """
     print("=" * 55)
     print("  Adam Mancini Bot — Tweet Scraper (v3)")
@@ -163,7 +163,7 @@ async def scrape_adam_tweets():
     print(f"🎯 Target: @{TWITTER_TARGET}")
     print(f"📁 Saving to: {OUTPUT_FILE}\n")
 
-    # ── Cargar cookies del navegador ──────────────────────────────────────
+    # ── Load browser cookies ──────────────────────────────────────────────
     print("🍪 Loading browser cookies...")
     client = Client('en-US')
 
@@ -172,7 +172,7 @@ async def scrape_adam_tweets():
 
     print("✅ Cookies loaded\n")
 
-    # ── Obtener perfil de Adam ────────────────────────────────────────────
+    # ── Get Adam's profile ────────────────────────────────────────────────
     print(f"🔍 Looking up profile @{TWITTER_TARGET}...")
     try:
         user = await client.get_user_by_screen_name(TWITTER_TARGET)
@@ -182,7 +182,7 @@ async def scrape_adam_tweets():
         print("   The cookies may have expired. Export them again from Chrome.")
         return
 
-    # ── Cargar tweets ya descargados ──────────────────────────────────────
+    # ── Load already-downloaded tweets ────────────────────────────────────
     existing_tweets = load_existing_tweets()
     existing_ids    = {t['id'] for t in existing_tweets}
     all_tweets      = existing_tweets.copy()
@@ -190,7 +190,7 @@ async def scrape_adam_tweets():
     if existing_tweets:
         print(f"📂 Resuming: {len(existing_tweets)} tweets already downloaded.\n")
 
-    # ── Descarga paginada ─────────────────────────────────────────────────
+    # ── Paginated download ────────────────────────────────────────────────
     print("📥 Downloading tweets...")
     print("-" * 40)
 
@@ -221,7 +221,7 @@ async def scrape_adam_tweets():
             print(f"  Page {page_num:3d}: +{page_new:3d} new | "
                   f"Total: {len(all_tweets):,}")
 
-            # Guardar progreso tras cada página
+            # Save progress after each page
             save_tweets(all_tweets)
 
             if not hasattr(tweets_page, 'next_cursor') or not tweets_page.next_cursor:
@@ -237,7 +237,7 @@ async def scrape_adam_tweets():
         print("💾 Saving current progress...")
         save_tweets(all_tweets)
 
-    # ── Resumen ───────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────
     save_tweets(all_tweets)
 
     print("\n" + "=" * 55)
@@ -258,7 +258,7 @@ async def scrape_adam_tweets():
 
 
 # ─────────────────────────────────────────────
-# Punto de entrada
+# Entry point
 # ─────────────────────────────────────────────
 if __name__ == '__main__':
     asyncio.run(scrape_adam_tweets())

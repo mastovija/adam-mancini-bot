@@ -1,36 +1,36 @@
 """
-parsers/tweet_monitor.py — Monitor de tweets en tiempo real con Playwright
+parsers/tweet_monitor.py — Real-time tweet monitor with Playwright
 ===========================================================================
-Comprueba cada 3 minutos si Adam Mancini ha publicado tweets nuevos.
-En horario de mercado, ante un tweet nuevo:
-  - Si es una señal accionable NUEVA → alerta Telegram inmediata
-  - Si es una actualización de niveles → registra para contexto
-  - Si es comentario general → registra para contexto
+Checks every 3 minutes whether Adam Mancini has posted new tweets.
+During market hours, on a new tweet:
+  - If it's a NEW actionable signal → immediate Telegram alert
+  - If it's a levels update → logged for context
+  - If it's general commentary → logged for context
 
-USO:
+USAGE:
     python parsers/tweet_monitor.py
 
-CÓMO FUNCIONA:
-    1. Cada 3 minutos abre Chromium brevemente (~5 segundos)
-    2. Navega a x.com/AdamMancini4 con tus cookies
-    3. Intercepta la llamada UserTweets que hace el navegador
-    4. Compara con el último tweet visto
-    5. Si hay nuevos → los clasifica con Claude Haiku
-    6. Cierra el navegador y espera 3 minutos
+HOW IT WORKS:
+    1. Every 3 minutes it opens Chromium briefly (~5 seconds)
+    2. Navigates to x.com/AdamMancini4 with your cookies
+    3. Intercepts the UserTweets call the browser makes
+    4. Compares against the last tweet seen
+    5. If there are new ones → classifies them with Claude Haiku
+    6. Closes the browser and waits 3 minutes
 
-FIXES APLICADOS:
-  - El LLM ahora distingue entre "señal nueva ahora" vs "Adam comentando
-    un trade pasado" (ayer, ystd, last night, etc.). Antes clasificaba
-    "We got a long YESTERDAY at 3:45PM" como señal accionable de hoy.
-  - Validación matemática: stop < entry para LONG, stop > entry para SHORT.
-    Si el LLM genera stop=7535 para un long en 7485, la señal se descarta.
+FIXES APPLIED:
+  - The LLM now distinguishes between "a new signal now" vs "Adam commenting
+    on a past trade" (yesterday, ystd, last night, etc.). It used to classify
+    "We got a long YESTERDAY at 3:45PM" as an actionable signal for today.
+  - Mathematical validation: stop < entry for LONG, stop > entry for SHORT.
+    If the LLM produces stop=7535 for a long at 7485, the signal is discarded.
 """
 
 import asyncio
 import json
 import sys
-# import re  ← eliminado C-14: sin uso tras reemplazar regex por str.find/rfind
-from datetime import datetime  # timezone eliminado C-14: sólo pytz.timezone() se usa aquí
+# import re  ← removed C-14: unused after replacing regex with str.find/rfind
+from datetime import datetime  # timezone removed C-14: only pytz.timezone() is used here
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -44,9 +44,9 @@ from config import (
     TWITTER_TARGET,
     ANTHROPIC_API_KEY,
     LLM_MODEL,
-    # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RAW_DIR ← eliminados C-14:
-    # los usaba enviar_telegram() que se eliminó en C-11.
-    # TelegramAlerter lee sus propias credenciales desde config internamente.
+    # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, RAW_DIR ← removed C-14:
+    # they were used by enviar_telegram(), which was removed in C-11.
+    # TelegramAlerter reads its own credentials from config internally.
     DATA_DIR,
     MARKET_TIMEZONE,
     MARKET_OPEN_HOUR, MARKET_OPEN_MIN,
@@ -62,14 +62,14 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Configuración
+# Configuration
 # ─────────────────────────────────────────────
 PROFILE_URL   = f'https://x.com/{TWITTER_TARGET}'
-POLL_INTERVAL = 180   # segundos entre checks (3 minutos)
+POLL_INTERVAL = 180   # seconds between checks (3 minutes)
 STATE_FILE    = DATA_DIR / 'tweet_monitor_state.json'
 
-# Palabras que indican que Adam habla de un trade PASADO, no uno nuevo ahora.
-# Si el tweet contiene alguna de estas palabras → NO es señal accionable.
+# Words that indicate Adam is talking about a PAST trade, not a new one now.
+# If the tweet contains any of these words → it is NOT an actionable signal.
 PALABRAS_PASADO = [
     'yesterday', 'ystd', 'last night', 'last week', 'this morning (was)',
     'earlier today', 'we got', 'we were', 'triggered yesterday',
@@ -79,13 +79,13 @@ PALABRAS_PASADO = [
 
 
 # ─────────────────────────────────────────────
-# Estado del monitor
+# Monitor state
 # ─────────────────────────────────────────────
 
 def cargar_estado() -> dict:
     """
-    Carga el estado del monitor: último tweet visto, tweets del día.
-    Persiste entre reinicios del bot.
+    Loads the monitor state: last tweet seen, today's tweets.
+    Persists across bot restarts.
     """
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
@@ -99,18 +99,18 @@ def cargar_estado() -> dict:
 
 
 def guardar_estado(estado: dict):
-    """Guarda el estado del monitor en disco."""
+    """Saves the monitor state to disk."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_FILE, 'w') as f:
         json.dump(estado, f, indent=2, ensure_ascii=False)
 
 
 # ─────────────────────────────────────────────
-# Horario de mercado
+# Market hours
 # ─────────────────────────────────────────────
 
 def en_horario_mercado() -> bool:
-    """Comprueba si estamos en horario activo (7:30-16:00 EST)."""
+    """Checks whether we're in active hours (7:30-16:00 EST)."""
     tz_ny = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz_ny)
 
@@ -123,13 +123,13 @@ def en_horario_mercado() -> bool:
 
 
 # ─────────────────────────────────────────────
-# Obtener tweets recientes
+# Fetch recent tweets
 # ─────────────────────────────────────────────
 
 async def obtener_tweets_recientes() -> list:
     """
-    Abre Chromium brevemente, carga el perfil de Adam y captura tweets recientes.
-    Solo tarda ~5 segundos.
+    Opens Chromium briefly, loads Adam's profile and captures recent tweets.
+    Only takes ~5 seconds.
     """
     tweets_capturados = []
 
@@ -160,7 +160,7 @@ async def obtener_tweets_recientes() -> list:
 
 
 # ─────────────────────────────────────────────
-# Clasificación con LLM
+# Classification with the LLM
 # ─────────────────────────────────────────────
 
 CLASIFICACION_PROMPT = """Analyze this tweet from Adam Mancini, an S&P 500/ES futures trader.
@@ -225,11 +225,11 @@ Respond ONLY with valid JSON, no extra text:
 
 def tweet_es_referencia_pasada(texto: str) -> bool:
     """
-    Filtro rápido de palabras clave ANTES de llamar al LLM.
-    Si el tweet claramente habla de ayer o antes, lo descartamos
-    como señal accionable sin gastar tokens en el LLM.
+    Fast keyword filter BEFORE calling the LLM.
+    If the tweet clearly talks about yesterday or earlier, we discard it
+    as an actionable signal without spending tokens on the LLM.
 
-    Devuelve True si el tweet parece ser una referencia a un trade pasado.
+    Returns True if the tweet appears to reference a past trade.
     """
     texto_lower = texto.lower()
     return any(palabra in texto_lower for palabra in PALABRAS_PASADO)
@@ -237,28 +237,28 @@ def tweet_es_referencia_pasada(texto: str) -> bool:
 
 async def clasificar_tweet(texto: str, fecha: str) -> dict:
     """
-    Usa Claude Haiku para clasificar un tweet de Adam.
+    Uses Claude Haiku to classify one of Adam's tweets.
 
-    FIX C-13: clasificar_tweet es llamada desde monitorizar() (async).
-    La llamada síncrona al LLM bloqueaba el event loop de Playwright.
-    asyncio.to_thread() la corre en un thread sin bloquear.
+    FIX C-13: clasificar_tweet is called from monitorizar() (async).
+    The synchronous LLM call blocked Playwright's event loop.
+    asyncio.to_thread() runs it in a thread without blocking.
 
-    Incluye dos capas de protección contra falsos positivos:
-    1. Filtro de palabras clave de pasado (antes del LLM, gratis)
-    2. Prompt del LLM con instrucciones explícitas sobre pasado vs presente
-    3. Validación matemática de stop < entry para longs (post-LLM)
+    Includes two layers of protection against false positives:
+    1. Past-keyword filter (before the LLM, free)
+    2. LLM prompt with explicit instructions about past vs present
+    3. Mathematical validation of stop < entry for longs (post-LLM)
     """
-    # Capa 1: filtro rápido de palabras de pasado
-    # Si el tweet menciona "yesterday", "ystd", etc. → no es señal accionable
-    # Aun así llamamos al LLM para clasificar tipo y niveles, pero forzamos
-    # accionable=False antes de que pueda disparar una alerta
+    # Layer 1: fast past-keyword filter
+    # If the tweet mentions "yesterday", "ystd", etc. → not an actionable signal
+    # We still call the LLM to classify type and levels, but we force
+    # accionable=False before it can trigger an alert
     es_pasado = tweet_es_referencia_pasada(texto)
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     prompt = CLASIFICACION_PROMPT.format(texto=texto[:600], fecha=fecha)
 
     try:
-        # C-13: to_thread libera el event loop de Playwright durante la llamada LLM.
+        # C-13: to_thread frees Playwright's event loop during the LLM call.
         response = await asyncio.to_thread(
             client.messages.create,
             model      = LLM_MODEL,
@@ -266,8 +266,8 @@ async def clasificar_tweet(texto: str, fecha: str) -> dict:
             messages   = [{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
-        # Mismo fix que generar_señal_llm: extraer el primer objeto JSON
-        # del texto para no romperse con texto extra o markdown del LLM.
+        # Same fix as generar_señal_llm: extract the first JSON object from
+        # the text so it doesn't break on extra text or markdown from the LLM.
         inicio = raw.find('{')
         fin    = raw.rfind('}')
         if inicio != -1 and fin != -1 and fin > inicio:
@@ -281,15 +281,15 @@ async def clasificar_tweet(texto: str, fecha: str) -> dict:
             "error": str(e)
         }
 
-    # Capa 2: si nuestro filtro detectó palabras de pasado, forzar accionable=False
-    # aunque el LLM haya dicho true (el LLM puede equivocarse)
+    # Layer 2: if our filter detected past words, force accionable=False
+    # even if the LLM said true (the LLM can be wrong)
     if es_pasado or clasificacion.get('es_referencia_pasada'):
         clasificacion['accionable'] = False
         clasificacion['_motivo_rechazo'] = 'referencia a trade pasado'
         return clasificacion
 
-    # Capa 3: validación matemática de stop vs entry
-    # Un long con stop mayor que la entrada es matemáticamente imposible
+    # Layer 3: mathematical validation of stop vs entry
+    # A long with a stop higher than the entry is mathematically impossible
     if clasificacion.get('accionable'):
         entrada   = clasificacion.get('entrada')
         stop      = clasificacion.get('stop')
@@ -311,12 +311,12 @@ async def clasificar_tweet(texto: str, fecha: str) -> dict:
 
 
 # ─────────────────────────────────────────────
-# Loop principal del monitor
+# Main monitor loop
 # ─────────────────────────────────────────────
 
 async def monitorizar():
     """
-    Loop principal: cada 3 minutos comprueba tweets nuevos de Adam.
+    Main loop: every 3 minutes it checks for new tweets from Adam.
     """
     print("=" * 55)
     print("  Bot Adam Mancini — Monitor de Tweets en Directo")
@@ -333,7 +333,7 @@ async def monitorizar():
         ahora_str  = datetime.now().strftime('%H:%M:%S')
         en_mercado = en_horario_mercado()
 
-        # Resetear tweets_hoy si cambió el día
+        # Reset tweets_hoy if the day changed
         hoy = datetime.now().strftime('%Y-%m-%d')
         if estado.get('fecha_hoy') != hoy:
             estado['tweets_hoy'] = []
@@ -379,19 +379,19 @@ async def monitorizar():
                         print(f"  📝 [{fecha}] {texto[:80]}...")
 
                         if en_mercado:
-                            # C-13: clasificar_tweet es ahora async
+                            # C-13: clasificar_tweet is now async
                             clasificacion = await clasificar_tweet(texto, fecha)
                             tipo = clasificacion.get('tipo', 'other')
 
-                            # ── Si fue rechazado → mostrar motivo en log ──
+                            # ── If it was rejected → show the reason in the log ──
                             motivo = clasificacion.get('_motivo_rechazo')
                             if motivo:
                                 print(f"     ⚠️  Descartado: {motivo}")
 
                             if clasificacion.get('accionable'):
-                                # C-11: usar send_tweet_alert del alerter
-                                # (HTML escapado, formato consistente con las demás alertas)
-                                # en lugar de construir el texto plano aquí.
+                                # C-11: use the alerter's send_tweet_alert
+                                # (escaped HTML, format consistent with the other alerts)
+                                # instead of building the plain text here.
                                 alerter = TelegramAlerter()
                                 await alerter.send_tweet_alert(tweet, clasificacion)
                                 direccion = (clasificacion.get('direccion') or '').upper()
@@ -401,7 +401,7 @@ async def monitorizar():
                             elif tipo == 'level':
                                 print(f"     📍 Niveles: {clasificacion.get('niveles_mencionados', [])}")
 
-                        # Guardar todos los tweets del día para contexto del LLM
+                        # Save all of the day's tweets for LLM context
                         estado.setdefault('tweets_hoy', []).append({
                             'tweet':        tweet,
                             'clasificacion': clasificacion if en_mercado else {}

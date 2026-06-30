@@ -1,40 +1,40 @@
 """
-market_data/ibkr_feed.py — Feed de precios ES Futures con IBKR Paper Trading
+market_data/ibkr_feed.py — ES Futures price feed with IBKR Paper Trading
 =============================================================================
-Reemplaza el feed de Alpaca/SPY por datos directos del contrato ES futures
-desde Interactive Brokers (paper trading).
+Replaces the Alpaca/SPY feed with direct data from the ES futures contract
+from Interactive Brokers (paper trading).
 
-POR QUÉ IBKR EN LUGAR DE ALPACA/SPY:
-  - Alpaca daba el precio de SPY y multiplicábamos ×10 → ruido e imprecisión
-  - Alpaca IEX feed NO tiene datos pre-mercado → nos perdíamos la ventana
-    prime de Adam (7:30-9:30 AM EST donde pone la mayoría de sus entradas)
-  - IBKR da el precio EXACTO del ES futures, sin proxy ni conversión
-  - IBKR tiene datos pre-mercado con useRTH=False en las peticiones históricas
+WHY IBKR INSTEAD OF ALPACA/SPY:
+  - Alpaca gave the SPY price and we multiplied ×10 → noise and imprecision
+  - The Alpaca IEX feed has NO pre-market data → we missed Adam's prime
+    window (7:30-9:30 AM EST where he places most of his entries)
+  - IBKR gives the EXACT ES futures price, with no proxy or conversion
+  - IBKR has pre-market data with useRTH=False on historical requests
 
-REQUISITOS PREVIOS (hacer una vez):
-  1. Instalar: pip install ib_insync
+PREREQUISITES (do once):
+  1. Install: pip install ib_insync
 
-  2. Descargar IB Gateway (versión ligera, no requiere TWS completo):
+  2. Download IB Gateway (lightweight version, doesn't require the full TWS):
      https://www.interactivebrokers.com/en/trading/ibgateway.php
 
-  3. En IB Gateway → configuración (engranaje) → API → Settings:
-       Puerto (Socket port): 4002
+  3. In IB Gateway → settings (gear) → API → Settings:
+       Socket port: 4002
        ✅ Allow connections from localhost only
-       ❌ Read-Only API (desmarcar para eliminar los warnings de error 321)
+       ❌ Read-Only API (uncheck to remove the error 321 warnings)
 
-  4. Añadir al .env:
-     IBKR_ES_EXPIRY=202609    ← Septiembre 2026 (ESU2026, el front month actual)
+  4. Add to .env:
+     IBKR_ES_EXPIRY=202609    ← September 2026 (ESU2026, the current front month)
 
-UNIDADES DE DURACIÓN IBKR (importante):
-  IBKR solo acepta: S (segundos), D (días), W (semanas), M (meses), Y (años)
-  NO acepta "H" (horas) — ese era el bug que fallaba en reqHistoricalData.
-  Usamos segundos para duraciones cortas y días para más largas.
+IBKR DURATION UNITS (important):
+  IBKR only accepts: S (seconds), D (days), W (weeks), M (months), Y (years)
+  It does NOT accept "H" (hours) — that was the bug that failed in reqHistoricalData.
+  We use seconds for short durations and days for longer ones.
 
-NOTAS SOBRE DATOS EN CUENTA PAPER:
-  - Las cuentas paper no incluyen feed de datos en tiempo real
-  - reqMarketDataType(3) solicita datos DELAYED (15 min de delay, gratuito)
-  - Las barras históricas de reqHistoricalData sí son datos reales sin delay
-  - Para detectar niveles con ±3 pts de tolerancia, delayed es suficiente
+NOTES ON DATA IN A PAPER ACCOUNT:
+  - Paper accounts don't include a real-time data feed
+  - reqMarketDataType(3) requests DELAYED data (15 min delay, free)
+  - The historical bars from reqHistoricalData are real data with no delay
+  - To detect levels with ±3 pts tolerance, delayed is sufficient
 """
 
 import asyncio
@@ -66,18 +66,18 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────
-# Horario de mercado
+# Market hours
 # ─────────────────────────────────────────────
 
 def is_market_open() -> bool:
     """
-    Determina si estamos en horario de trading de Adam (7:30-16:00 EST).
-    ES futures opera casi 24h, pero Adam solo opera en este rango.
+    Determines whether we're in Adam's trading hours (7:30-16:00 EST).
+    ES futures trade almost 24h, but Adam only trades in this range.
     """
     tz = pytz.timezone(MARKET_TIMEZONE)
     ahora = datetime.now(tz)
 
-    if ahora.weekday() >= 5:  # sábado=5, domingo=6
+    if ahora.weekday() >= 5:  # Saturday=5, Sunday=6
         return False
 
     apertura = ahora.replace(
@@ -90,25 +90,25 @@ def is_market_open() -> bool:
 
 
 # ─────────────────────────────────────────────
-# Feed ES Futures con IBKR
+# ES Futures feed with IBKR
 # ─────────────────────────────────────────────
 
 class ESFeed:
     """
-    Feed directo de ES Futures desde IBKR paper trading.
+    Direct ES Futures feed from IBKR paper trading.
 
-    IMPORTANTE — get_bars() es ASYNC:
-        Con asyncio ya corriendo (el caso normal del bot), reqHistoricalData()
-        síncrono falla con "This event loop is already running".
-        Usamos reqHistoricalDataAsync() → siempre llamar con 'await':
+    IMPORTANT — get_bars() is ASYNC:
+        With asyncio already running (the bot's normal case), the synchronous
+        reqHistoricalData() fails with "This event loop is already running".
+        We use reqHistoricalDataAsync() → always call it with 'await':
             bars = await self.feed.get_bars(15, 8)
 
-    CICLO DE VIDA:
+    LIFECYCLE:
         feed = ESFeed()
-        await feed.connect_async()     # una sola vez al arrancar
-        snapshot = feed.get_snapshot() # síncrono — lee ticker cacheado
-        bars = await feed.get_bars()   # async — petición a IBKR
-        feed.disconnect()              # al apagar el bot
+        await feed.connect_async()     # once at startup
+        snapshot = feed.get_snapshot() # synchronous — reads the cached ticker
+        bars = await feed.get_bars()   # async — request to IBKR
+        feed.disconnect()              # when shutting down the bot
     """
 
     def __init__(self):
@@ -120,8 +120,8 @@ class ESFeed:
 
     async def connect_async(self):
         """
-        Conecta a IB Gateway y suscribe a datos de mercado delayed.
-        Llamar UNA SOLA VEZ al arrancar el bot (desde signal_engine.run_loop).
+        Connects to IB Gateway and subscribes to delayed market data.
+        Call ONCE at bot startup (from signal_engine.run_loop).
         """
         if self._connected:
             return
@@ -142,13 +142,13 @@ class ESFeed:
             print(f"   2. API enabled, port {IBKR_PORT}")
             raise
 
-        # Tipo 3 = DELAYED (~15 min de retraso, gratuito con cuenta paper)
-        # Sin esto → error 354 "Requested market data is not subscribed"
-        # Tipo 1 = LIVE (requiere suscripción de pago en IBKR)
+        # Type 3 = DELAYED (~15 min delay, free with a paper account)
+        # Without this → error 354 "Requested market data is not subscribed"
+        # Type 1 = LIVE (requires a paid subscription at IBKR)
         self.ib.reqMarketDataType(3)
         print("   📡 Data mode: DELAYED (15 min) — enough for signals")
 
-        # Calificar el contrato: IBKR completa los detalles (conId, localSymbol, etc.)
+        # Qualify the contract: IBKR fills in the details (conId, localSymbol, etc.)
         contrato_raw = Future(
             symbol='ES',
             exchange='CME',
@@ -167,8 +167,8 @@ class ESFeed:
         print(f"   ✅ Qualified contract: {self._contract.localSymbol} "
               f"(expires {self._contract.lastTradeDateOrContractMonth})")
 
-        # Suscribir a stream de ticks en tiempo real (delayed con tipo 3)
-        # El ticker se actualiza automáticamente cuando llegan nuevos ticks
+        # Subscribe to the real-time tick stream (delayed with type 3)
+        # The ticker updates automatically when new ticks arrive
         self._ticker = self.ib.reqMktData(
             self._contract,
             genericTickList='',
@@ -190,7 +190,7 @@ class ESFeed:
         print(f"   ✅ IBKR feed active — {self._contract.localSymbol}\n")
 
     def disconnect(self):
-        """Desconecta limpiamente de IB Gateway."""
+        """Disconnects cleanly from IB Gateway."""
         if self._connected:
             try:
                 if self._contract:
@@ -202,7 +202,7 @@ class ESFeed:
             print("🔌 IBKR disconnected cleanly")
 
     def _ensure_connected(self) -> bool:
-        """Verifica que la conexión sigue activa."""
+        """Verifies the connection is still active."""
         if not self._connected or not self.ib.isConnected():
             print("  ⚠️  IBKR disconnected")
             self._connected = False
@@ -211,8 +211,8 @@ class ESFeed:
 
     def _get_current_price(self) -> Optional[float]:
         """
-        Lee el precio actual del ticker cacheado.
-        Orden de preferencia: last (última transacción) → close (cierre anterior).
+        Reads the current price from the cached ticker.
+        Order of preference: last (last trade) → close (previous close).
         """
         if not self._ticker:
             return None
@@ -230,16 +230,16 @@ class ESFeed:
 
     def get_snapshot(self) -> Optional[dict]:
         """
-        Obtiene el precio actual del ES (SÍNCRONO — lee ticker cacheado).
+        Gets the current ES price (SYNCHRONOUS — reads the cached ticker).
 
-        El ticker se actualiza en background por ib_insync, así que
-        get_snapshot() es instantáneo: solo lee el último valor recibido.
+        The ticker is updated in the background by ib_insync, so
+        get_snapshot() is instant: it just reads the last value received.
 
-        Devuelve dict compatible con SPYFeed.get_snapshot():
+        Returns a dict compatible with SPYFeed.get_snapshot():
         {
             'timestamp':       '2026-06-18T10:32:00',
-            'spy_price':       750.5,     ← es_price / 10 (solo compatibilidad)
-            'es_equivalent':   7505.0,    ← precio ES real
+            'spy_price':       750.5,     ← es_price / 10 (compatibility only)
+            'es_equivalent':   7505.0,    ← real ES price
             'bar':             {ohlcv},
             'in_market_hours': True
         }
@@ -252,7 +252,7 @@ class ESFeed:
             print("  ⚠️  No ES price in the IBKR stream")
             return None
 
-        # Guardia: más de 10 min sin actualización → posible desconexión silenciosa
+        # Guard: more than 10 min without an update → possible silent disconnect
         if self._last_update:
             edad_seg = (datetime.now() - self._last_update).total_seconds()
             if edad_seg > 600:
@@ -261,7 +261,7 @@ class ESFeed:
 
         return {
             'timestamp':     datetime.now().isoformat(),
-            'spy_price':       round(precio_es / 10.0, 2),  # compatibilidad legacy
+            'spy_price':       round(precio_es / 10.0, 2),  # legacy compatibility
             'es_equivalent':   precio_es,
             'bar': {
                 'open': precio_es, 'high': precio_es,
@@ -273,40 +273,40 @@ class ESFeed:
 
     async def get_bars(self, timeframe_minutes: int = 15, n: int = 10) -> list:
         """
-        Obtiene las últimas N barras del ES en el timeframe indicado.
+        Gets the last N ES bars at the given timeframe.
 
-        ASYNC — llamar con 'await':
+        ASYNC — call with 'await':
             bars = await self.feed.get_bars(15, 8)
 
-        Usa reqHistoricalDataAsync en lugar del wrapper síncrono porque
-        el event loop ya está corriendo cuando el bot está activo.
+        Uses reqHistoricalDataAsync instead of the synchronous wrapper because
+        the event loop is already running when the bot is active.
 
-        UNIDADES DE DURACIÓN IBKR VÁLIDAS: S D W M Y (NO "H" — horas no existe)
-        Usamos segundos ("S") para duraciones cortas, días ("D") para largas.
+        VALID IBKR DURATION UNITS: S D W M Y (NOT "H" — hours doesn't exist)
+        We use seconds ("S") for short durations, days ("D") for long ones.
 
-        useRTH=False: incluye pre-mercado (7:30-9:30 AM) — CRÍTICO para Adam.
-        Los precios devueltos son en puntos ES directos (ej: 7505.25).
+        useRTH=False: includes pre-market (7:30-9:30 AM) — CRITICAL for Adam.
+        The returned prices are in direct ES points (e.g. 7505.25).
         """
         if not self._ensure_connected():
             return []
 
-        # ── Calcular duración en formato válido IBKR ─────────────────────
-        # IBKR acepta: {número} S/D/W/M/Y — "H" NO es válido
-        # Usamos segundos para ser precisos y no pedir demasiado
-        # (n*2 para tener margen de barras vacías por gaps de mercado cerrado)
+        # ── Compute the duration in a valid IBKR format ──────────────────
+        # IBKR accepts: {number} S/D/W/M/Y — "H" is NOT valid
+        # We use seconds to be precise and not request too much
+        # (n*2 to leave margin for empty bars from closed-market gaps)
         segundos_necesarios = timeframe_minutes * n * 2 * 60
 
-        if segundos_necesarios <= 86400:        # hasta 1 día → usar segundos
+        if segundos_necesarios <= 86400:        # up to 1 day → use seconds
             duration = f"{segundos_necesarios} S"
-        elif segundos_necesarios <= 86400 * 5:  # hasta 5 días → usar días
+        elif segundos_necesarios <= 86400 * 5:  # up to 5 days → use days
             dias = (segundos_necesarios // 86400) + 1
             duration = f"{dias} D"
-        else:                                   # más de 5 días → semanas
+        else:                                   # more than 5 days → weeks
             semanas = (segundos_necesarios // (86400 * 7)) + 1
             duration = f"{semanas} W"
 
-        # ── Formato de barra para IBKR ────────────────────────────────────
-        # IBKR acepta: "1 min", "5 mins", "15 mins", "1 hour", "1 day", etc.
+        # ── Bar format for IBKR ───────────────────────────────────────────
+        # IBKR accepts: "1 min", "5 mins", "15 mins", "1 hour", "1 day", etc.
         if timeframe_minutes == 1:
             bar_size = "1 min"
         elif timeframe_minutes < 60:
@@ -317,11 +317,11 @@ class ESFeed:
             bar_size = f"{timeframe_minutes // 60} hours"
 
         try:
-            # reqHistoricalDataAsync → awaitable, no bloquea el event loop
-            # endDateTime='' → hasta "ahora"
-            # whatToShow='TRADES' → precios reales de transacciones
-            # useRTH=False → INCLUYE pre-mercado (esencial para Adam 7:30-9:30 AM)
-            # keepUpToDate=False → petición puntual, no suscripción continua
+            # reqHistoricalDataAsync → awaitable, doesn't block the event loop
+            # endDateTime='' → up to "now"
+            # whatToShow='TRADES' → real trade prices
+            # useRTH=False → INCLUDES pre-market (essential for Adam 7:30-9:30 AM)
+            # keepUpToDate=False → one-off request, not a continuous subscription
             bars_ibkr = await self.ib.reqHistoricalDataAsync(
                 contract=self._contract,
                 endDateTime='',
@@ -346,28 +346,28 @@ class ESFeed:
                     'timestamp': str(b.date),
                 }
                 for b in bars_ibkr
-                if b.open > 100 and b.close > 100  # filtrar barras vacías
+                if b.open > 100 and b.close > 100  # filter out empty bars
             ]
 
-            return bars[-n:]  # últimas N, de más antigua a más reciente
+            return bars[-n:]  # last N, oldest to newest
 
         except Exception as e:
             print(f"  ⚠️  Error fetching IBKR {timeframe_minutes}min bars: {e}")
             return []
 
     def spy_to_es(self, price: float) -> float:
-        """Con IBKR el precio ya es ES. Mantenido para compatibilidad."""
+        """With IBKR the price is already ES. Kept for compatibility."""
         return float(price)
 
 
 # ─────────────────────────────────────────────
-# Test de conexión independiente
+# Standalone connection test
 # ─────────────────────────────────────────────
 
 async def _test_feed():
     """
-    Prueba la conexión con IB Gateway y muestra datos del ES.
-    Ejecutar con: python market_data/ibkr_feed.py
+    Tests the connection with IB Gateway and shows ES data.
+    Run with: python market_data/ibkr_feed.py
     """
     print("=" * 60)
     print("  IBKR Feed Test — ES Futures")
@@ -381,7 +381,7 @@ async def _test_feed():
         await feed.connect_async()
 
         print("\n📊 Fetching current snapshot...")
-        snapshot = feed.get_snapshot()  # síncrono
+        snapshot = feed.get_snapshot()  # synchronous
 
         if snapshot:
             print(f"\n✅ Snapshot OK:")
