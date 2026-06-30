@@ -28,8 +28,8 @@ try:
     from telegram.constants import ParseMode
     from telegram.error import TelegramError
 except ImportError:
-    print("❌ python-telegram-bot no instalado.")
-    print("   Ejecuta: pip install python-telegram-bot")
+    print("❌ python-telegram-bot not installed.")
+    print("   Run: pip install python-telegram-bot")
     sys.exit(1)
 
 
@@ -349,7 +349,7 @@ class TelegramAlerter:
             f"• Adam posts an actionable tweet\n"
             f"• Tomorrow's newsletter is ready"
         )
-        print("✅ Mensaje de prueba enviado a Telegram")
+        print("✅ Test message sent to Telegram")
 
 
 # ─────────────────────────────────────────────
@@ -358,16 +358,16 @@ class TelegramAlerter:
 
 async def main():
     print("=" * 50)
-    print("  Test Telegram — Bot Adam Mancini")
+    print("  Telegram Test — Adam Mancini Bot")
     print("=" * 50)
 
     alerter = TelegramAlerter()
 
-    print("📱 Enviando mensaje de prueba...")
+    print("📱 Sending test message...")
     await alerter.send_test()
     await asyncio.sleep(1)
 
-    print("📋 Enviando briefing de ejemplo...")
+    print("📋 Sending sample briefing...")
     today_ejemplo = {
         'date':          '2026-06-10',
         'title':         'Has SPX Moved Into Sell Bounces Mode? June 11 Plan',
@@ -379,18 +379,18 @@ async def main():
                           7451, 7458, 7465, 7472, 7478, 7487, 7495, 7501, 7508,
                           7517, 7527, 7538, 7550, 7558, 7565, 7570, 7577, 7588,
                           7593, 7604, 7620, 7630, 7638, 7643, 7651],
-        'setup':         'Mode 2 rangebound (7308-7390). El mercado requiere recuperación de 7390 para confirmar control alcista y acceso a 7527; caída bajo 7296 activa caso bajista con breakdown trades.',
-        'invalida_si':   'Cierre sostenido bajo 7296 invalida el bias alcista e inicia caso bajista; o recuperación sostenida sobre 7390 que alcance 7527 confirma ruptura alcista.',
+        'setup':         'Mode 2 rangebound (7308-7390). The market needs to reclaim 7390 to confirm bullish control and access to 7527; a drop below 7296 triggers the bearish case with breakdown trades.',
+        'invalida_si':   'A sustained close below 7296 invalidates the bullish bias and starts the bearish case; or a sustained reclaim above 7390 that reaches 7527 confirms the bullish breakout.',
         'is_complete':   True,
     }
     await alerter.send_morning_briefing(today_ejemplo)
     await asyncio.sleep(1)
 
-    print("⚡ Enviando señal de ejemplo...")
+    print("⚡ Sending sample signal...")
     señal_ejemplo = {
         'entrar':     True,
         'direccion':  'long',
-        'razon':      'Failed Breakdown en 7308. Bias mixed pero soporte mayor. Vela 15min confirma bounce. Contexto histórico similar muestra 70% de continuación alcista desde este nivel.',
+        'razon':      'Failed Breakdown at 7308. Bias mixed but major support. 15min candle confirms the bounce. Similar historical context shows 70% bullish continuation from this level.',
         'entrada_es': 7308,
         'stop_es':    7290,
         'target1_es': 7358,
@@ -400,7 +400,7 @@ async def main():
     await alerter.send_signal_alert(señal_ejemplo, 7310.0, 7308, today_ejemplo)
     await asyncio.sleep(1)
 
-    print("🐦 Enviando alerta de tweet de ejemplo...")
+    print("🐦 Sending sample tweet alert...")
     tweet_ejemplo  = {
         'text':       'ES holding 7308 long here target 7358 stop 7290. Failed breakdown. If loses 7290 adds more risk.',
         'created_at': '2026-06-10T14:32:00+00:00',
@@ -412,11 +412,11 @@ async def main():
         'entrada':    7308,
         'stop':       7290,
         'target':     7358,
-        'resumen':    'Long en 7308 con target 7358 y stop 7290',
+        'resumen':    'Long at 7308 with target 7358 and stop 7290',
     }
     await alerter.send_tweet_alert(tweet_ejemplo, clasif_ejemplo)
 
-    print("\n✅ Test completado — revisa tu Telegram")
+    print("\n✅ Test complete — check your Telegram")
 
 
 if __name__ == '__main__':

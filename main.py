@@ -37,8 +37,8 @@ try:
     HAS_SCHEDULER = True
 except ImportError:
     HAS_SCHEDULER = False
-    print("⚠️  APScheduler no disponible — el newsletter no se reparsea automáticamente")
-    print("   Instala con: pip install apscheduler")
+    print("⚠️  APScheduler not available — the newsletter is not re-parsed automatically")
+    print("   Install with: pip install apscheduler")
 
 
 # ─────────────────────────────────────────────
@@ -67,22 +67,22 @@ async def tarea_newsletter_diario():
     if today_file.exists():
         minutos = (datetime.now().timestamp() - today_file.stat().st_mtime) / 60
         if minutos < GRACE_MINUTES:
-            print(f"\n⏰ [7:30 AM] Newsletter ya parseado hace {minutos:.0f} min "
-                  f"— omitiendo (inicializar() lo hizo al arrancar)")
+            print(f"\n⏰ [7:30 AM] Newsletter already parsed {minutos:.0f} min ago "
+                  f"— skipping (inicializar() did it at startup)")
             return
 
-    print("\n⏰ [7:30 AM] Parseando newsletter diario...")
+    print("\n⏰ [7:30 AM] Parsing daily newsletter...")
     alerter = TelegramAlerter()
 
     try:
         today = parse_daily_newsletter(force=True)
         if today:
             await alerter.send_morning_briefing(today)
-            print("✅ Newsletter parseado y briefing enviado")
+            print("✅ Newsletter parsed and briefing sent")
         else:
             await alerter.send("⚠️ Could not fetch today's newsletter")
     except Exception as e:
-        print(f"❌ Error en tarea newsletter: {e}")
+        print(f"❌ Error in newsletter task: {e}")
         # parse_mode=None: this notice is plain text (no HTML tags) and the exception {e}
         # may contain <, > or & (paths, URLs with &, scrape fragments). Without this, that
         # character would break Telegram's HTML parser and the error notice would be lost.
@@ -102,21 +102,21 @@ async def inicializar():
     tz_ny   = pytz.timezone(MARKET_TIMEZONE)
     hora    = datetime.now(tz_ny).strftime('%H:%M EST')
 
-    print("\n🚀 Iniciando Bot Adam Mancini...")
+    print("\n🚀 Starting Adam Mancini Bot...")
 
     # ── 1. Parse newsletter ───────────────────────────────────────────────
-    print("📰 Parseando newsletter...")
+    print("📰 Parsing newsletter...")
     try:
         today = parse_daily_newsletter()
     except Exception as e:
-        print(f"  ⚠️  Error newsletter: {e}")
+        print(f"  ⚠️  Newsletter error: {e}")
         today = None
 
     # ── 2. Morning briefing to Telegram ───────────────────────────────────
     try:
         if today:
             await alerter.send_morning_briefing(today)
-            print("✅ Briefing enviado a Telegram")
+            print("✅ Briefing sent to Telegram")
         else:
             await alerter.send(
                 f"🤖 <b>Adam Mancini Bot started</b>\n"
@@ -124,14 +124,14 @@ async def inicializar():
                 f"⚠️ No newsletter available today — monitoring only"
             )
     except Exception as e:
-        print(f"  ⚠️  Error enviando briefing: {e}")
+        print(f"  ⚠️  Error sending briefing: {e}")
 
-    print("✅ Inicialización completada\n")
+    print("✅ Initialization complete\n")
     return today
 
 
 # ─────────────────────────────────────────────
-# Programa principal
+# Main program
 # ─────────────────────────────────────────────
 
 async def main():
@@ -165,13 +165,13 @@ async def main():
         )
 
         scheduler.start()
-        print("⏰ Scheduler activo: newsletter a las 7:30 AM EST (lun-vie)")
+        print("⏰ Scheduler active: newsletter at 7:30 AM EST (Mon-Fri)")
 
     # ── Modules in parallel ───────────────────────────────────────────────
-    print("\n▶️  Arrancando módulos:")
-    print("   • Motor de señales (cada 60s)")
-    print("   • Monitor de tweets (cada 3 min)")
-    print("   • Esperando horario de mercado...\n")
+    print("\n▶️  Starting modules:")
+    print("   • Signal engine (every 60s)")
+    print("   • Tweet monitor (every 3 min)")
+    print("   • Waiting for market hours...\n")
 
     engine = SignalEngine()
 
@@ -204,7 +204,7 @@ def handle_shutdown(loop, alerter):
     Instead, we schedule the send as a task inside the active loop
     and stop the loop when it finishes.
     """
-    print("\n⏹️  Apagando bot...")
+    print("\n⏹️  Shutting down bot...")
 
     async def _despedida_y_stop():
         try:
@@ -223,9 +223,9 @@ def handle_shutdown(loop, alerter):
 
 if __name__ == '__main__':
     print("=" * 55)
-    print("  Bot Adam Mancini — Trading Intelligence")
+    print("  Adam Mancini Bot — Trading Intelligence")
     print("=" * 55)
-    print("  Ctrl+C para parar\n")
+    print("  Ctrl+C to stop\n")
 
     loop    = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -241,4 +241,4 @@ if __name__ == '__main__':
         pass  # Loop stopped by the signal handler
     finally:
         loop.close()
-        print("👋 Bot detenido")
+        print("👋 Bot stopped")

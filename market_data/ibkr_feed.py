@@ -159,8 +159,8 @@ class ESFeed:
         contratos = await self.ib.qualifyContractsAsync(contrato_raw)
         if not contratos:
             raise ValueError(
-                f"IBKR no encontró el contrato ES {IBKR_ES_EXPIRY}.\n"
-                f"Formato válido: '202609' (sep 2026), '202612' (dic 2026)"
+                f"IBKR did not find the ES contract {IBKR_ES_EXPIRY}.\n"
+                f"Valid format: '202609' (sep 2026), '202612' (dec 2026)"
             )
 
         self._contract = contratos[0]

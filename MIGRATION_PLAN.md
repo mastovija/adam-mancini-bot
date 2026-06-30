@@ -1,7 +1,7 @@
 # Spanish → English Migration Plan
 
-> **Status:** inventory only — nothing edited yet.
-> **Generated:** 2026-06-30
+> **Status:** ✅ **COMPLETE** — all five tiers done. Project-wide accent sweep clean.
+> **Generated:** 2026-06-30 · **Completed:** 2026-06-30
 > **Scope:** all project source (`.py`, `.md`, `.txt`, `.example`). Excludes `venv/`, `.git/`, `__pycache__/`, and `data/` (price-bar JSON).
 
 ## How to read this
@@ -26,22 +26,22 @@ These are `f"""…"""` templates passed as `messages=[{"role":"user","content":p
 
 **The assembled prompt Claude reads is now fully English in all three call paths, including every string interpolated at runtime. JSON output *key* names are preserved (parsing depends on them); *values* — free-text and enums — are English.**
 
-- [ ] **`knowledge_base/processor.py`** — *~37 Spanish lines*
+- [x] **`knowledge_base/processor.py`** — *~37 Spanish lines*
   - [x] 🔴 `EXTRACTION_PROMPT` (L32–L56, ~25 lines) — newsletter → structured bias/levels extraction ✅ translated to English (keys unchanged)
-  - [ ] docstrings/comments (~12 lines): module docstring, `ESTRATEGIA DE EXTRACCIÓN`, fallback comments
-- [ ] **`parsers/tweet_monitor.py`** — *~86 Spanish lines*
+  - [x] docstrings/comments (~12 lines): module docstring, `ESTRATEGIA DE EXTRACCIÓN`, fallback comments ✅ done in Tier 4
+- [x] **`parsers/tweet_monitor.py`** — *~86 Spanish lines*
   - [x] 🔴 `CLASIFICACION_PROMPT` (L166–L223, ~58 lines) — tweet classifier prompt ✅ fully English, incl. `tipo` enum values now `signal`/`level`/`comment`/`other` (was `senal`/`nivel`/`comentario`/`otro`). All comparison/default sites updated: `tweet_monitor.py` (return default L278, `.get` default L384, `== 'level'` L401) **and** consumer `bot/telegram_alerts.py` (lookup-dict keys L227-232 + default L224 + `__main__` sample L409). Keys unchanged.
-  - [ ] docstrings/comments (~73 lines): module header `CÓMO FUNCIONA`, market-hours logic, save-state comments
-  - [ ] print/log strings (~3 lines)
-- [ ] **`signals/signal_engine.py`** — *~209 Spanish lines (largest file in repo)*
+  - [x] docstrings/comments (~73 lines): module header `CÓMO FUNCIONA`, market-hours logic, save-state comments ✅ done in Tier 4
+  - [x] print/log strings (~3 lines) ✅ done in Tier 5 final sweep
+- [x] **`signals/signal_engine.py`** — *~209 Spanish lines (largest file in repo)*
   - [x] 🔴 `SIGNAL_PROMPT` (L440–L508, ~69 lines) — the core entry-decision prompt ✅ translated to English (keys unchanged)
   - [x] 🔴 `formatear_tweets_para_prompt()` ✅ translated (LLM-facing return strings)
   - [x] 🔴 Runtime-interpolated prompt fragments ✅ all translated: `get_trading_window()` `ventana`+`criterio` return strings (incl. "FUERA del horario…"), `confirmacion` strings, `detect_failed_breakdown` `descripcion` values + `calidad` fragments (`profundo`/`moderado`→`deep`/`moderate`), `content_plan` fallback (`Plan no disponible`), `fb_descripcion` fallback (`Sin análisis`), and the `tipo_nivel` values `soporte`/`resistencia`/`pivote`→`support`/`resistance`/`pivot` (producers L105/108/112 + consumer `determinar_lado` L314-315). *Note: `entrar: false` left literal inside criterio strings — it references the JSON output key.*
-  - [ ] Telegram management-alert strings (T1/T2/stop-hit) — *see Tier 2 note*
-  - [ ] docstrings/comments (~129 lines): module header `MEJORAS AÑADIDAS`, state-persistence, cooldown, main-loop docstrings
-  - [ ] print/log strings (~5 lines)
+  - [x] Telegram management-alert strings (T1/T2/stop-hit) — rendered in `telegram_alerts.py`, ✅ done in Tier 2
+  - [x] docstrings/comments (~129 lines): module header `MEJORAS AÑADIDAS`, state-persistence, cooldown, main-loop docstrings ✅ done in Tier 4
+  - [x] print/log strings (~5 lines) ✅ done in Tier 5 final sweep
 
-> **Out of scope / not touched:** `backtest/backtester.py` keeps its own independent `soporte`/`resistencia`/`pivote` level dicts — it shares no runtime data with `signal_engine.py` and never feeds `SIGNAL_PROMPT` (offline tool, Tier 3). The Spanish display strings in `telegram_alerts.py` (`SEÑAL ACCIONABLE`, etc.) and the Spanish docstrings/comments in all three files remain — those are Tier 2/3/4.
+> **Out of scope / not touched:** `backtest/backtester.py` keeps its own independent `soporte`/`resistencia`/`pivote` level dicts — it shares no runtime data with `signal_engine.py` and never feeds `SIGNAL_PROMPT` (offline tool, Tier 3). Those level-dict literals plus all Spanish-named variables/functions/constants remain by design. Everything else (display strings, docstrings, comments, console output) across these three files is now English — see Tiers 2/4/5.
 
 ---
 
@@ -49,16 +49,16 @@ These are `f"""…"""` templates passed as `messages=[{"role":"user","content":p
 
 Strings sent to the user's phone via `bot.send_message(...)` / `alerter.send(...)`.
 
-**All user-facing Telegram message templates are now English.** Only displayed string *values* were translated — internal dict keys (`signal`/`level`/`comment`, `bias`, `nivel_critico`, etc.), variable names (`señal`, `lineas`, `soportes_str`…), f-string interpolations, emoji, and HTML tags are untouched. Docstrings/comments and operator-facing `print()`/log strings remain Spanish (Tier 3/4). Both touched files pass `py_compile`.
+**All user-facing Telegram message templates are now English.** Only displayed string *values* were translated — internal dict keys (`signal`/`level`/`comment`, `bias`, `nivel_critico`, etc.), variable names (`señal`, `lineas`, `soportes_str`…), f-string interpolations, emoji, and HTML tags are untouched. Docstrings/comments (Tier 4) and operator-facing `print()`/log strings (Tier 5 final sweep) were completed in later passes. Both touched files pass `py_compile`.
 
 - [x] **`bot/telegram_alerts.py`** — *~65 Spanish lines*
   - [x] 🟠 Message templates ✅ translated: `_fecha_legible` day/month abbrevs (`Lun`→`Mon`, `Ene`→`Jan`, …), `_format_levels` "+N más"→"+N more", 📋 briefing (`PLAN DE ADAM`→`ADAM'S PLAN`, `Crítico`→`Critical`, `Soportes`→`Supports`, `Invalida si`→`Invalidated if`, preview line), ⚡ signal alert (`Entrada`→`Entry`, `Nivel`→`Level`, `Confianza`→`Confidence`), 🐦 tweet alert (`tipo_txt` values `SEÑAL ACCIONABLE`→`ACTIONABLE SIGNAL`/`ACTUALIZACIÓN NIVELES`→`LEVELS UPDATE`/`COMENTARIO`→`COMMENT`, `ADAM TWEETEA`→`ADAM TWEETS`, `Entrada`→`Entry`), T1/T2/stop management alerts (`ALCANZADO`→`REACHED`, `Ganancia`→`gain`, `cobrado`→`banked`, `TOCADO`→`HIT`, `CERRADO EN BREAKEVEN`→`CLOSED AT BREAKEVEN`, etc.), and `send_test` connection message.
-  - [ ] docstrings/comments (~29 lines): module header "Envía tres tipos de mensajes al móvil", `USO (test rápido)` — *Tier 3/4, left Spanish*
-  - [ ] print/log (~1 line) — *Tier 3, left Spanish*
+  - [x] docstrings/comments (~29 lines): module header + `USO (test rápido)` ✅ done in Tier 4
+  - [x] print/log (~1 line): import-error + `send_test`/`__main__` prints ✅ done in Tier 5 final sweep
 - [x] **`main.py`** — *~43 Spanish lines*
   - [x] 🟠 User-facing alert text via `alerter.send(...)` ✅ translated: "Could not fetch today's newsletter", "Newsletter error: {e}", startup message (`Bot Adam Mancini iniciado`→`Adam Mancini Bot started`, `No hay newsletter…`→`No newsletter available today — monitoring only`), shutdown message (`detenido`→`stopped`).
-  - [ ] docstrings/comments (~34 lines): orchestration flow docstrings — *Tier 3/4, left Spanish*
-  - [ ] print/log (~5 lines) — *Tier 3, left Spanish*
+  - [x] docstrings/comments (~34 lines): orchestration flow docstrings ✅ done in Tier 4
+  - [x] print/log (~5 lines) ✅ done in Tier 5 final sweep
 - [x] **`signals/signal_engine.py`** *(cross-ref)* — management-alert Telegram strings: the rendered alerts live in `telegram_alerts.py` (`send_t1/t2/stop_alert`, translated above); no user-facing template strings remain in `signal_engine.py` itself.
 
 ---
@@ -96,16 +96,30 @@ Files whose Spanish is almost entirely developer-facing.
 
 > Note: comment/docstring Spanish was also embedded in every Tier-1/2/3 file — handled in the same pass. Files touched in this tier: `knowledge_base/{vectordb,processor,build_kb,add_tweets_to_kb}.py`, `parsers/{playwright_utils,newsletter_parser,tweet_monitor}.py`, `scrapers/{substack_scraper,twitter_scraper,twitter_scraper_playwright}.py`, `market_data/{alpaca_feed,ibkr_feed}.py`, `bot/telegram_alerts.py`, `backtest/{download_data,backtester}.py`, `signals/signal_engine.py`, `main.py`.
 
-> **Out of scope, left Spanish (by instruction):** operator-facing `print`/log strings still in Spanish in `main.py`, `parsers/tweet_monitor.py`, and `signals/signal_engine.py` (Tier-3 residue for those three files); exception-message string literals (`ValueError`/`RuntimeError`); the `telegram_alerts.py` `__main__` sample-data dict values. `config.py` comments remain Tier 5.
+> **Originally deferred at Tier 4, now finished in Tier 5:** the operator-facing `print`/log strings in `main.py`, `parsers/tweet_monitor.py`, and `signals/signal_engine.py` (Tier-3 residue for those three files); the exception-message string literals (`ValueError`/`RuntimeError` in `signal_engine.py` and `ibkr_feed.py`); and the `telegram_alerts.py` `__main__` sample-data dict values — all translated in the final sweep. `config.py` comments were also completed in Tier 5. See the **Tier-3 console residue** subsection under Tier 5 below.
 
 ---
 
-## TIER 5 — Docs / config  ⚪
+## TIER 5 — Docs / config  ⚪ — ✅ COMPLETE
 
-- [ ] **`config.py`** — *~33 lines* (almost all comments: module header `Configuración central`, `SPY_TO_ES_MULTIPLIER` notes, IBKR/Alpaca fallback comments; ~2 strings)
-- [ ] **`.env.example`** — *~8 lines* (Spanish setup comments, 7 comment lines)
-- [ ] **`requirements.txt`** — *~10 lines* (Spanish section comments, ~3 comment lines)
-- [ ] **`README.md`** — ✅ **already English** (0 Spanish lines) — no action
+All config/doc comments are now English. Only comments and the few human-readable strings were translated; env-var names, keys, package specs, URLs, and example token values are untouched.
+
+- [x] **`config.py`** ✅ module header, all section banners (`Rutas del proyecto`→`Project paths`, `Fuente de datos de mercado`→`Market data source`, etc.), inline comments (IBKR/Alpaca/ChromaDB/market-hours notes, `SPY_TO_ES_MULTIPLIER` block), and the `tu @usuario`/`contraseña` field comments translated
+- [x] **`.env.example`** ✅ header + INSTRUCTIONS block, per-section setup comments (Twitter/Anthropic/Alpaca/Telegram/Substack), and placeholder values (`tu_usuario_sin_arroba`→`your_username_without_at`, `tu_contraseña`→`your_password`) translated
+- [x] **`requirements.txt`** ✅ header + all section banners (`Dependencias Python`→`Python dependencies`, `Base vectorial`→`Vector store`, etc.) and per-package inline comments translated; package specifiers untouched
+- [x] **`README.md`** ✅ **already English** (0 Spanish lines) — no action
+
+### Tier-3 console residue cleaned up in this pass
+
+Tiers 1–4 had deliberately deferred the operator-facing `print()` strings in `main.py`, `parsers/tweet_monitor.py`, and `signals/signal_engine.py` (plus the `bot/telegram_alerts.py` import-error/test prints and the `clear_recent_slugs.py` prints). The final sweep finished all of them so no Spanish console output remains:
+
+- [x] **`main.py`** ✅ all startup/shutdown/scheduler/newsletter prints + `Programa principal` banner translated
+- [x] **`parsers/tweet_monitor.py`** ✅ monitor banner, poll-loop status prints, signal/level/discard prints, `_motivo_rechazo` strings translated
+- [x] **`signals/signal_engine.py`** ✅ feed banner, today.json/state warnings, trade-management prints (T1/T2/stop/timeout), LLM enter/no-enter prints, run-loop banner, "market closed" wait, `ValueError`/`razon` exception strings translated
+- [x] **`bot/telegram_alerts.py`** ✅ import-error prints + `send_test` console line + `__main__` test-harness prints and Spanish sample-data values (`setup`/`invalida_si`/`razon`/`resumen`) translated
+- [x] **`clear_recent_slugs.py`** ✅ all four `print()` status strings translated
+
+> Verified: project-wide accent sweep (`ñáéíóúü¿¡` + uppercase) returns only excluded categories — variable/function/constant names (`señal`, `generar_señal_llm`, `COOLDOWN_SEÑAL_MIN`, `señales_generadas`…), internal dict keys (`'senales'`, `'dias_con_fb'`…), comments referencing the `generar_señal_llm` symbol, and the deliberately-kept ChromaDB `document_text` data string (`Título:` in `vectordb.py`). All touched files pass `py_compile`.
 
 ---
 

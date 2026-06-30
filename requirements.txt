@@ -1,37 +1,37 @@
 # ─────────────────────────────────────────────────────────────
-# Adam Mancini Bot - Dependencias Python
+# Adam Mancini Bot - Python dependencies
 # ─────────────────────────────────────────────────────────────
 
 # ── Scraping ──────────────────────────────────────────────────
-# twikit eliminado: reemplazado por Playwright (playwright_utils.py + twitter_scraper_playwright.py)
-requests>=2.31.0       # HTTP requests para Substack y APIs
-beautifulsoup4>=4.12.0 # Parsear HTML del newsletter Substack
-lxml>=5.0.0            # Parser HTML rápido para beautifulsoup
+# twikit removed: replaced by Playwright (playwright_utils.py + twitter_scraper_playwright.py)
+requests>=2.31.0       # HTTP requests for Substack and APIs
+beautifulsoup4>=4.12.0 # Parse the Substack newsletter HTML
+lxml>=5.0.0            # Fast HTML parser for beautifulsoup
 
-# ── LLM / Inteligencia Artificial ─────────────────────────────
-anthropic>=0.25.0      # Claude API — usamos Haiku (~$3-5/mes)
+# ── LLM / Artificial Intelligence ─────────────────────────────
+anthropic>=0.25.0      # Claude API — we use Haiku (~$3-5/month)
 
-# ── Base vectorial (RAG) ──────────────────────────────────────
-chromadb>=0.5.0        # Base de datos vectorial local, sin coste
+# ── Vector store (RAG) ────────────────────────────────────────
+chromadb>=0.5.0        # Local vector database, free
 
-# ── Datos de mercado ──────────────────────────────────────────
-ib_insync>=0.9.86      # IBKR ES Futures — fuente principal (DATA_SOURCE='ibkr' en config.py)
-                       # Requiere IB Gateway corriendo en Mac, puerto 4002 (paper trading)
-                       # Tras instalar IB Gateway: habilitar API en configuración → puerto 4002
-alpaca-py>=0.25.0      # Alpaca SPY — fallback si IBKR Gateway no está disponible
+# ── Market data ───────────────────────────────────────────────
+ib_insync>=0.9.86      # IBKR ES Futures — primary source (DATA_SOURCE='ibkr' in config.py)
+                       # Requires IB Gateway running on Mac, port 4002 (paper trading)
+                       # After installing IB Gateway: enable API in settings → port 4002
+alpaca-py>=0.25.0      # Alpaca SPY — fallback if IBKR Gateway is not available
 
-# ── Bot de Telegram ───────────────────────────────────────────
-python-telegram-bot>=21.0  # Enviar alertas al móvil
+# ── Telegram Bot ──────────────────────────────────────────────
+python-telegram-bot>=21.0  # Send alerts to the phone
 
-# ── Análisis de datos y técnico ───────────────────────────────
-pandas>=2.0.0          # Manipulación de datos de mercado
-pandas-ta>=0.3.14b     # Indicadores técnicos (RSI, VWAP, etc.)
-numpy>=1.24.0          # Cálculos numéricos
+# ── Data and technical analysis ───────────────────────────────
+pandas>=2.0.0          # Market data manipulation
+pandas-ta>=0.3.14b     # Technical indicators (RSI, VWAP, etc.)
+numpy>=1.24.0          # Numerical computations
 
-# ── Utilidades ────────────────────────────────────────────────
-python-dotenv>=1.0.0   # Carga variables desde .env
-apscheduler>=3.10.0    # Tareas programadas (parseo diario, monitoring)
-pytz>=2024.1           # Zonas horarias (mercado NY = EST)
+# ── Utilities ─────────────────────────────────────────────────
+python-dotenv>=1.0.0   # Load variables from .env
+apscheduler>=3.10.0    # Scheduled tasks (daily parsing, monitoring)
+pytz>=2024.1           # Time zones (NY market = EST)
 
-playwright>=1.40.0     # Monitor de tweets (intercepta GraphQL de X)
-# Tras instalar: playwright install chromium
+playwright>=1.40.0     # Tweet monitor (intercepts X GraphQL)
+# After installing: playwright install chromium

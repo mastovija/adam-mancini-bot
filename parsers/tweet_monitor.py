@@ -57,7 +57,7 @@ from parsers.playwright_utils import extract_tweets, crear_contexto_con_cookies
 try:
     from playwright.async_api import async_playwright
 except ImportError:
-    print("❌ Playwright no instalado.")
+    print("❌ Playwright not installed.")
     sys.exit(1)
 
 
@@ -299,12 +299,12 @@ async def clasificar_tweet(texto: str, fecha: str) -> dict:
             if direccion == 'long' and float(stop) >= float(entrada):
                 clasificacion['accionable'] = False
                 clasificacion['_motivo_rechazo'] = (
-                    f'stop ({stop}) >= entrada ({entrada}) en LONG — matemáticamente imposible'
+                    f'stop ({stop}) >= entry ({entrada}) in LONG — mathematically impossible'
                 )
             elif direccion == 'short' and float(stop) <= float(entrada):
                 clasificacion['accionable'] = False
                 clasificacion['_motivo_rechazo'] = (
-                    f'stop ({stop}) <= entrada ({entrada}) en SHORT — matemáticamente imposible'
+                    f'stop ({stop}) <= entry ({entrada}) in SHORT — mathematically impossible'
                 )
 
     return clasificacion
@@ -319,13 +319,13 @@ async def monitorizar():
     Main loop: every 3 minutes it checks for new tweets from Adam.
     """
     print("=" * 55)
-    print("  Bot Adam Mancini — Monitor de Tweets en Directo")
+    print("  Adam Mancini Bot — Live Tweet Monitor")
     print("=" * 55)
-    print(f"🎯 Monitorizando: @{TWITTER_TARGET}")
-    print(f"⏱️  Intervalo: cada {POLL_INTERVAL // 60} minutos")
-    print(f"🕐 Horario activo: {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d}–"
+    print(f"🎯 Monitoring: @{TWITTER_TARGET}")
+    print(f"⏱️  Interval: every {POLL_INTERVAL // 60} minutes")
+    print(f"🕐 Active hours: {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d}–"
           f"{MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MIN:02d} EST\n")
-    print("Ctrl+C para parar\n")
+    print("Ctrl+C to stop\n")
 
     estado = cargar_estado()
 
@@ -339,14 +339,14 @@ async def monitorizar():
             estado['tweets_hoy'] = []
             estado['fecha_hoy']  = hoy
 
-        print(f"[{ahora_str}] Comprobando tweets... "
-              f"({'🟢 mercado abierto' if en_mercado else '🔴 fuera de mercado'})")
+        print(f"[{ahora_str}] Checking tweets... "
+              f"({'🟢 market open' if en_mercado else '🔴 market closed'})")
 
         try:
             tweets_recientes = await obtener_tweets_recientes()
 
             if not tweets_recientes:
-                print(f"  ⚠️  Sin datos — posible problema de conexión")
+                print(f"  ⚠️  No data — possible connection problem")
             else:
                 tweets_recientes.sort(
                     key=lambda t: int(t.get('id', 0)), reverse=True
@@ -367,7 +367,7 @@ async def monitorizar():
                     estado['ultimo_check']     = datetime.now().isoformat()
 
                 if tweets_nuevos:
-                    print(f"  🆕 {len(tweets_nuevos)} tweet(s) nuevo(s)")
+                    print(f"  🆕 {len(tweets_nuevos)} new tweet(s)")
 
                     for tweet in tweets_nuevos:
                         texto = tweet.get('text', '')
@@ -386,7 +386,7 @@ async def monitorizar():
                             # ── If it was rejected → show the reason in the log ──
                             motivo = clasificacion.get('_motivo_rechazo')
                             if motivo:
-                                print(f"     ⚠️  Descartado: {motivo}")
+                                print(f"     ⚠️  Discarded: {motivo}")
 
                             if clasificacion.get('accionable'):
                                 # C-11: use the alerter's send_tweet_alert
@@ -396,10 +396,10 @@ async def monitorizar():
                                 await alerter.send_tweet_alert(tweet, clasificacion)
                                 direccion = (clasificacion.get('direccion') or '').upper()
                                 entrada   = clasificacion.get('entrada')
-                                print(f"     ✅ Señal: {direccion} | entrada {entrada}")
+                                print(f"     ✅ Signal: {direccion} | entry {entrada}")
 
                             elif tipo == 'level':
-                                print(f"     📍 Niveles: {clasificacion.get('niveles_mencionados', [])}")
+                                print(f"     📍 Levels: {clasificacion.get('niveles_mencionados', [])}")
 
                         # Save all of the day's tweets for LLM context
                         estado.setdefault('tweets_hoy', []).append({
@@ -408,14 +408,14 @@ async def monitorizar():
                         })
 
                 else:
-                    print(f"  ✓ Sin tweets nuevos")
+                    print(f"  ✓ No new tweets")
 
                 guardar_estado(estado)
 
         except Exception as e:
             print(f"  ❌ Error: {e}")
 
-        print(f"  ⏳ Próximo check en {POLL_INTERVAL // 60} minutos\n")
+        print(f"  ⏳ Next check in {POLL_INTERVAL // 60} minutes\n")
         await asyncio.sleep(POLL_INTERVAL)
 
 
@@ -423,4 +423,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(monitorizar())
     except KeyboardInterrupt:
-        print("\n⏹️  Monitor detenido")
+        print("\n⏹️  Monitor stopped")

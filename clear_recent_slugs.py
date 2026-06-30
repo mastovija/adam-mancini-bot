@@ -9,7 +9,7 @@ REPROCESS_FROM = '2025-01-01'
 with open(PROGRESS_FILE) as f:
     processed = set(json.load(f))
 
-print(f"Slugs procesados: {len(processed)}")
+print(f"Processed slugs: {len(processed)}")
 
 recientes = set()
 for f in NEWSLETTER_DIR.glob('*.json'):
@@ -22,6 +22,6 @@ for f in NEWSLETTER_DIR.glob('*.json'):
 
 actualizados = processed - recientes
 json.dump(list(actualizados), open(PROGRESS_FILE, 'w'))
-print(f"A re-procesar (2025+): {len(recientes)}")
-print(f"Se mantienen (pre-2025): {len(actualizados)}")
-print("\nEjecuta ahora: python knowledge_base/build_kb.py")
+print(f"To re-process (2025+): {len(recientes)}")
+print(f"Kept (pre-2025): {len(actualizados)}")
+print("\nRun now: python knowledge_base/build_kb.py")
