@@ -80,13 +80,13 @@ async def tarea_newsletter_diario():
             await alerter.send_morning_briefing(today)
             print("✅ Newsletter parseado y briefing enviado")
         else:
-            await alerter.send("⚠️ No se pudo obtener el newsletter de hoy")
+            await alerter.send("⚠️ Could not fetch today's newsletter")
     except Exception as e:
         print(f"❌ Error en tarea newsletter: {e}")
         # parse_mode=None: este aviso es texto plano (sin etiquetas HTML) y la excepción {e}
         # puede traer <, > o & (rutas, URLs con &, fragmentos del scrape). Sin esto, ese
         # carácter rompería el parser HTML de Telegram y el aviso de error se perdería.
-        await alerter.send(f"❌ Error newsletter: {e}", parse_mode=None)
+        await alerter.send(f"❌ Newsletter error: {e}", parse_mode=None)
 
 
 # ─────────────────────────────────────────────
@@ -119,9 +119,9 @@ async def inicializar():
             print("✅ Briefing enviado a Telegram")
         else:
             await alerter.send(
-                f"🤖 <b>Bot Adam Mancini iniciado</b>\n"
+                f"🤖 <b>Adam Mancini Bot started</b>\n"
                 f"⏰ {hora}\n"
-                f"⚠️ No hay newsletter disponible hoy — solo monitoring activo"
+                f"⚠️ No newsletter available today — monitoring only"
             )
     except Exception as e:
         print(f"  ⚠️  Error enviando briefing: {e}")
@@ -208,7 +208,7 @@ def handle_shutdown(loop, alerter):
 
     async def _despedida_y_stop():
         try:
-            await alerter.send("⏹️ <b>Bot Adam Mancini detenido</b>")
+            await alerter.send("⏹️ <b>Adam Mancini Bot stopped</b>")
         except Exception:
             pass  # Si Telegram falla, paramos igualmente
         loop.stop()

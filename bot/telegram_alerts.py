@@ -48,17 +48,17 @@ def _format_levels(levels: list, max_show: int = 12) -> str:
     visible = [str(int(n)) for n in levels[:max_show] if n]
     result  = ' · '.join(visible)
     if len(levels) > max_show:
-        result += f" <i>(+{len(levels) - max_show} más)</i>"
+        result += f" <i>(+{len(levels) - max_show} more)</i>"
     return result
 
 
 def _fecha_legible(fecha_raw: str) -> str:
-    """Convierte '2026-06-09' en 'Mar 9 Jun'."""
+    """Convierte '2026-06-09' en 'Tue 9 Jun'."""
     try:
         fecha_obj = datetime.strptime(fecha_raw, '%Y-%m-%d')
-        dias  = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-        meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
-                 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+        dias  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        meses = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         return f"{dias[fecha_obj.weekday()]} {fecha_obj.day} {meses[fecha_obj.month-1]}"
     except Exception:
         return fecha_raw
@@ -121,7 +121,7 @@ class TelegramAlerter:
         invalida = html.escape(today.get('invalida_si') or '')
 
         lineas = [
-            f"📋 <b>PLAN DE ADAM — {fecha_str}</b>",
+            f"📋 <b>ADAM'S PLAN — {fecha_str}</b>",
             "─" * 30,
         ]
         if titulo:
@@ -130,10 +130,10 @@ class TelegramAlerter:
         lineas.append(f"Bias:     {bias_emo} <b>{bias}</b>")
 
         if today.get('nivel_critico'):
-            lineas.append(f"Crítico:  <b>{int(today['nivel_critico'])}</b>")
+            lineas.append(f"Critical: <b>{int(today['nivel_critico'])}</b>")
 
         if soportes_str:
-            lineas.append(f"🟩 Soportes:\n{soportes_str}")
+            lineas.append(f"🟩 Supports:\n{soportes_str}")
 
         if resistencias_str:
             lineas.append(f"🟥 Resists:\n{resistencias_str}")
@@ -142,10 +142,10 @@ class TelegramAlerter:
             lineas += ["", f"💭 <b>Setup:</b> {setup}"]
 
         if invalida:
-            lineas += ["", f"⚠️ <b>Invalida si:</b> {invalida}"]
+            lineas += ["", f"⚠️ <b>Invalidated if:</b> {invalida}"]
 
         if not today.get('is_complete'):
-            lineas += ["", "💡 <i>Preview — suscríbete para análisis completo</i>"]
+            lineas += ["", "💡 <i>Preview — subscribe for full analysis</i>"]
 
         await self.send('\n'.join(lineas))
 
@@ -190,7 +190,7 @@ class TelegramAlerter:
         lineas = [
             f"{dir_emo} <b>{dir_text} ES — Adam Mancini</b>",
             "─" * 28,
-            f"📍 Entrada:   <b>{entrada}</b>",
+            f"📍 Entry:     <b>{entrada}</b>",
         ]
         if stop:
             lineas.append(f"🛑 Stop:      <b>{stop}</b>")
@@ -205,9 +205,9 @@ class TelegramAlerter:
             lineas.append(rr_str.strip())
 
         lineas += [
-            f"📊 Nivel: {int(nivel)} | Bias: {today.get('bias','?').upper()}",
+            f"📊 Level: {int(nivel)} | Bias: {today.get('bias','?').upper()}",
             f"💭 {razon}",
-            f"🎯 Confianza: <b>{conf:.0%}</b>  ⏰ {hora} EST",
+            f"🎯 Confidence: <b>{conf:.0%}</b>  ⏰ {hora} EST",
         ]
 
         await self.send('\n'.join(lineas))
@@ -226,9 +226,9 @@ class TelegramAlerter:
 
         tipo_emo = {'signal': '⚡', 'level': '📍', 'comment': '💬'}.get(tipo, '🐦')
         tipo_txt = {
-            'signal':  'SEÑAL ACCIONABLE',
-            'level':   'ACTUALIZACIÓN NIVELES',
-            'comment': 'COMENTARIO',
+            'signal':  'ACTIONABLE SIGNAL',
+            'level':   'LEVELS UPDATE',
+            'comment': 'COMMENT',
         }.get(tipo, tipo.upper())
 
         texto   = html.escape(tweet.get('text') or '')
@@ -238,7 +238,7 @@ class TelegramAlerter:
         hora_str = hora_raw[11:16] if len(hora_raw) > 15 else ''
 
         lineas = [
-            f"{tipo_emo} <b>ADAM TWEETEA — {tipo_txt}</b>",
+            f"{tipo_emo} <b>ADAM TWEETS — {tipo_txt}</b>",
             "─" * 28,
             f'<i>"{texto}"</i>',
             "─" * 28,
@@ -256,7 +256,7 @@ class TelegramAlerter:
             if direccion and entrada:
                 dir_emo   = '🟢' if direccion == 'LONG' else '🔴'
                 trade_str = f"{dir_emo} {direccion}"
-                if entrada: trade_str += f" | Entrada: {entrada}"
+                if entrada: trade_str += f" | Entry: {entrada}"
                 if stop:    trade_str += f" | SL: {stop}"
                 if target:  trade_str += f" | TP: {target}"
                 lineas += ["", f"<b>{trade_str}</b>"]
@@ -280,18 +280,18 @@ class TelegramAlerter:
         Recibe el dict del trade activo tal como lo guarda signal_engine.py.
         """
         ganancia = precio_es - trade['entrada']
-        t2_str   = str(int(trade['t2'])) if trade.get('t2') else 'máximo posible'
+        t2_str   = str(int(trade['t2'])) if trade.get('t2') else 'max possible'
         await self.send(
-            f"✅ <b>T1 ALCANZADO — {int(trade['t1'])}</b>\n"
+            f"✅ <b>T1 REACHED — {int(trade['t1'])}</b>\n"
             f"{'─' * 28}\n"
-            f"📈 Ganancia actual: <b>+{ganancia:.0f} pts</b>\n"
+            f"📈 Current gain: <b>+{ganancia:.0f} pts</b>\n"
             f"{'─' * 28}\n"
-            f"📋 <b>ACCIÓN (metodología Adam):</b>\n"
-            f"   1️⃣ Cerrar 75% ahora\n"
-            f"   2️⃣ Mover stop a BREAKEVEN <b>{trade['entrada']:.0f}</b>\n"
-            f"   3️⃣ Dejar runner → T2: {t2_str}\n"
+            f"📋 <b>ACTION (Adam's methodology):</b>\n"
+            f"   1️⃣ Close 75% now\n"
+            f"   2️⃣ Move stop to BREAKEVEN <b>{trade['entrada']:.0f}</b>\n"
+            f"   3️⃣ Leave runner → T2: {t2_str}\n"
             f"{'─' * 28}\n"
-            f"🏃 Runner activo | Stop: <b>{trade['entrada']:.0f}</b> (breakeven)"
+            f"🏃 Runner active | Stop: <b>{trade['entrada']:.0f}</b> (breakeven)"
         )
 
     async def send_t2_alert(self, trade: dict, precio_es: float):
@@ -301,13 +301,13 @@ class TelegramAlerter:
         ganancia_runner = precio_es - trade['entrada']
         ganancia_t1     = trade['t1'] - trade['entrada']
         await self.send(
-            f"🏆 <b>T2 ALCANZADO — {int(trade['t2'])}</b>\n"
+            f"🏆 <b>T2 REACHED — {int(trade['t2'])}</b>\n"
             f"{'─' * 28}\n"
-            f"📈 Ganancia runner: <b>+{ganancia_runner:.0f} pts</b>\n"
-            f"📈 T1 cobrado:      <b>+{ganancia_t1:.0f} pts</b> (75%)\n"
+            f"📈 Runner gain: <b>+{ganancia_runner:.0f} pts</b>\n"
+            f"📈 T1 banked:   <b>+{ganancia_t1:.0f} pts</b> (75%)\n"
             f"{'─' * 28}\n"
-            f"📋 Cerrar runner o trail stop muy ajustado\n"
-            f"✅ Trade completado según metodología Adam"
+            f"📋 Close runner or trail stop very tight\n"
+            f"✅ Trade completed per Adam's methodology"
         )
 
     async def send_stop_alert(self, trade: dict, precio_es: float):
@@ -317,21 +317,21 @@ class TelegramAlerter:
         if trade.get('t1_alcanzado'):
             ganancia_t1 = trade['t1'] - trade['entrada']
             await self.send(
-                f"🔄 <b>RUNNER CERRADO EN BREAKEVEN</b>\n"
+                f"🔄 <b>RUNNER CLOSED AT BREAKEVEN</b>\n"
                 f"{'─' * 28}\n"
-                f"📊 Entrada: {trade['entrada']:.0f} | Salida runner: {precio_es:.0f}\n"
+                f"📊 Entry: {trade['entrada']:.0f} | Runner exit: {precio_es:.0f}\n"
                 f"💰 Runner: ≈0 pts (breakeven)\n"
-                f"✅ T1 cobrado: <b>+{ganancia_t1:.0f} pts</b> en el 75%\n"
+                f"✅ T1 banked: <b>+{ganancia_t1:.0f} pts</b> on the 75%\n"
                 f"{'─' * 28}\n"
                 f"📋 Adam: <i>'First trade is a win — stop trading'</i>"
             )
         else:
             perdida = precio_es - trade['entrada']
             await self.send(
-                f"🛑 <b>STOP LOSS TOCADO</b>\n"
+                f"🛑 <b>STOP LOSS HIT</b>\n"
                 f"{'─' * 28}\n"
-                f"📊 Entrada: {trade['entrada']:.0f} | Stop: {precio_es:.0f}\n"
-                f"📉 Resultado: <b>{perdida:.0f} pts</b>\n"
+                f"📊 Entry: {trade['entrada']:.0f} | Stop: {precio_es:.0f}\n"
+                f"📉 Result: <b>{perdida:.0f} pts</b>\n"
                 f"{'─' * 28}\n"
                 f"📋 Adam: <i>'First trade loss → one more attempt allowed today'</i>"
             )
@@ -341,13 +341,13 @@ class TelegramAlerter:
         tz_ny = pytz.timezone(MARKET_TIMEZONE)
         hora  = datetime.now(tz_ny).strftime('%H:%M EST')
         await self.send(
-            f"✅ <b>Bot Adam Mancini — Conectado</b>\n\n"
-            f"Hora: {hora}\n"
-            f"Estado: Todas las fases operativas\n\n"
-            f"Recibirás alertas cuando:\n"
-            f"• El precio toque un nivel de Adam\n"
-            f"• Adam publique un tweet accionable\n"
-            f"• El newsletter de mañana esté listo"
+            f"✅ <b>Adam Mancini Bot — Connected</b>\n\n"
+            f"Time: {hora}\n"
+            f"Status: All phases operational\n\n"
+            f"You'll receive alerts when:\n"
+            f"• Price touches one of Adam's levels\n"
+            f"• Adam posts an actionable tweet\n"
+            f"• Tomorrow's newsletter is ready"
         )
         print("✅ Mensaje de prueba enviado a Telegram")
 

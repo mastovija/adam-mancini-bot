@@ -45,19 +45,21 @@ These are `f"""…"""` templates passed as `messages=[{"role":"user","content":p
 
 ---
 
-## TIER 2 — Telegram user-facing messages  🟠
+## TIER 2 — Telegram user-facing messages  🟠 — ✅ COMPLETE
 
 Strings sent to the user's phone via `bot.send_message(...)` / `alerter.send(...)`.
 
-- [ ] **`bot/telegram_alerts.py`** — *~65 Spanish lines*
-  - [ ] 🟠 Message templates (~32 string lines): 📋 Briefing matutino, ⚡ Alerta de señal, level-list formatter ("Limita a max_show niveles…"), emoji-labelled sections
-  - [ ] docstrings/comments (~29 lines): module header "Envía tres tipos de mensajes al móvil", `USO (test rápido)`
-  - [ ] print/log (~1 line)
-- [ ] **`main.py`** — *~43 Spanish lines*
-  - [ ] 🟠 User-facing alert text via `alerter.send(...)` — e.g. `"❌ Error newsletter: {e}"` and the plain-text aviso comment (L86–L89)
-  - [ ] docstrings/comments (~34 lines): orchestration flow docstrings
-  - [ ] print/log (~5 lines)
-- [ ] **`signals/signal_engine.py`** *(cross-ref)* — management-alert Telegram strings live here; migrate alongside its Tier-1 prompt work.
+**All user-facing Telegram message templates are now English.** Only displayed string *values* were translated — internal dict keys (`signal`/`level`/`comment`, `bias`, `nivel_critico`, etc.), variable names (`señal`, `lineas`, `soportes_str`…), f-string interpolations, emoji, and HTML tags are untouched. Docstrings/comments and operator-facing `print()`/log strings remain Spanish (Tier 3/4). Both touched files pass `py_compile`.
+
+- [x] **`bot/telegram_alerts.py`** — *~65 Spanish lines*
+  - [x] 🟠 Message templates ✅ translated: `_fecha_legible` day/month abbrevs (`Lun`→`Mon`, `Ene`→`Jan`, …), `_format_levels` "+N más"→"+N more", 📋 briefing (`PLAN DE ADAM`→`ADAM'S PLAN`, `Crítico`→`Critical`, `Soportes`→`Supports`, `Invalida si`→`Invalidated if`, preview line), ⚡ signal alert (`Entrada`→`Entry`, `Nivel`→`Level`, `Confianza`→`Confidence`), 🐦 tweet alert (`tipo_txt` values `SEÑAL ACCIONABLE`→`ACTIONABLE SIGNAL`/`ACTUALIZACIÓN NIVELES`→`LEVELS UPDATE`/`COMENTARIO`→`COMMENT`, `ADAM TWEETEA`→`ADAM TWEETS`, `Entrada`→`Entry`), T1/T2/stop management alerts (`ALCANZADO`→`REACHED`, `Ganancia`→`gain`, `cobrado`→`banked`, `TOCADO`→`HIT`, `CERRADO EN BREAKEVEN`→`CLOSED AT BREAKEVEN`, etc.), and `send_test` connection message.
+  - [ ] docstrings/comments (~29 lines): module header "Envía tres tipos de mensajes al móvil", `USO (test rápido)` — *Tier 3/4, left Spanish*
+  - [ ] print/log (~1 line) — *Tier 3, left Spanish*
+- [x] **`main.py`** — *~43 Spanish lines*
+  - [x] 🟠 User-facing alert text via `alerter.send(...)` ✅ translated: "Could not fetch today's newsletter", "Newsletter error: {e}", startup message (`Bot Adam Mancini iniciado`→`Adam Mancini Bot started`, `No hay newsletter…`→`No newsletter available today — monitoring only`), shutdown message (`detenido`→`stopped`).
+  - [ ] docstrings/comments (~34 lines): orchestration flow docstrings — *Tier 3/4, left Spanish*
+  - [ ] print/log (~5 lines) — *Tier 3, left Spanish*
+- [x] **`signals/signal_engine.py`** *(cross-ref)* — management-alert Telegram strings: the rendered alerts live in `telegram_alerts.py` (`send_t1/t2/stop_alert`, translated above); no user-facing template strings remain in `signal_engine.py` itself.
 
 ---
 
