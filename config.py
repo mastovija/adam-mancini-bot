@@ -69,12 +69,25 @@ SUBSTACK_COOKIES = os.getenv('SUBSTACK_COOKIES', '')  # for paid content
 
 
 # ─────────────────────────────────────────────
-# Anthropic API (Claude Haiku for parsing and signals)
+# Anthropic API — tiered models (Phase 2)
 # ─────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
-# Haiku is enough to extract levels/bias and evaluate setups
-LLM_MODEL = 'claude-haiku-4-5-20251001'
+# LLM_MODEL — cheap, high-volume tasks: newsletter level extraction and tweet
+# classification. Haiku is plenty for structured extraction/classification.
+LLM_MODEL = os.getenv('LLM_MODEL', 'claude-haiku-4-5-20251001')
+
+# LLM_DECISION_MODEL — the trade DECISION (generar_señal_llm). Phase 2 upgrades
+# this to Sonnet 5 for sharper, more Mancini-faithful judgment. It fires only on
+# structural Failed-Breakdown triggers (a few times a day), so the higher
+# per-call cost is negligible. The methodology rubric is cached, so its ~2.2k
+# tokens bill at ~0.1x on repeat calls.
+LLM_DECISION_MODEL = os.getenv('LLM_DECISION_MODEL', 'claude-sonnet-5')
+
+# Minimum model confidence required to actually SEND a signal (Phase 2). The
+# model can say "enter" with weak conviction; Adam only trades 100%-conviction
+# setups. Below this we suppress the alert and log a near-miss for calibration.
+MIN_SIGNAL_CONFIDENCE = float(os.getenv('MIN_SIGNAL_CONFIDENCE', '0.6'))
 
 
 # ─────────────────────────────────────────────

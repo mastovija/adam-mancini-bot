@@ -34,6 +34,8 @@ from config import (
     DATA_SOURCE,
     ANTHROPIC_API_KEY,
     LLM_MODEL,
+    LLM_DECISION_MODEL,
+    MIN_SIGNAL_CONFIDENCE,
     SPY_TO_ES_MULTIPLIER,
     LEVEL_TOLERANCE_POINTS,
     MARKET_TIMEZONE,
@@ -437,29 +439,37 @@ def detect_failed_breakdown(bars_15: list, nivel: float) -> dict:
 # Signal generation with the LLM
 # ─────────────────────────────────────────────
 
-SIGNAL_PROMPT = """You are Adam Mancini deciding whether you should enter a trade right now in ES futures.
+# ─────────────────────────────────────────────
+# Mancini methodology — the cached "brain" (Phase 1)
+# ─────────────────────────────────────────────
+# The LLM now reasons from Adam's ACTUAL published methodology
+# (knowledge_base/methodology/rubric.md, distilled from his fundamentals doc),
+# not a hardcoded paraphrase. The rubric is static, so it is sent as a CACHED
+# system block (cache_control: ephemeral) → ~0.1x cost after the first call.
+# This is what restores his real "significant low" definition (range/cluster
+# reclaims), the "flush size only sets acceptance needed" rule, the full
+# acceptance protocol, and the Level Reclaim / back-test setups.
+_METHODOLOGY_DIR = Path(__file__).parent.parent / 'knowledge_base' / 'methodology'
+_RUBRIC_FILE = _METHODOLOGY_DIR / 'rubric.md'
+_EXAMPLES_FILE = _METHODOLOGY_DIR / 'examples.md'
+try:
+    MANCINI_SYSTEM = _RUBRIC_FILE.read_text(encoding='utf-8')
+except FileNotFoundError:
+    MANCINI_SYSTEM = ("You are Adam Mancini trading ES futures. (Methodology rubric "
+                      "missing — run scrapers/fetch_methodology.py to restore it.)")
 
-══════════════════════════════════════════════════════════
-METHODOLOGY (fixed base, always applies):
-══════════════════════════════════════════════════════════
-Your ONLY entry setup is the Failed Breakdown:
-  1. Elevator down: price drops vertically toward a significant low
-  2. Flush BELOW the low (trap for shorts, institutions accumulate)
-  3. Recovery ABOVE the low → entry trigger
-  4. Wait for ACCEPTANCE or the non-acceptance protocol (5+ pts above, 2 min)
+# Phase 3 — append the reason-by-example few-shot block (real setups distilled
+# from his own newsletter recaps) to the cached system prompt. It teaches the
+# entry discrimination the abstract rubric alone missed live: take the deep
+# Failed Breakdown of a genuine significant low; skip the mid-range /
+# tested-to-death chop. Static → still one cached block.
+if _EXAMPLES_FILE.exists():
+    MANCINI_SYSTEM += "\n\n" + _EXAMPLES_FILE.read_text(encoding='utf-8')
 
-A significant low is valid ONLY if it is:
-  - Previous day's low (daily low)
-  - Multi-hour low (a low that took 2+ hours to form, 20+ pt drop)
-  - Shelf of lows (several lows in the same zone over several hours)
-
-You also have the Level Reclaim / Backtest:
-  A resistance broken to the upside that becomes support → long on the backtest.
-
-NEVER: knife catch, minor levels "tested to death", going short.
-
-══════════════════════════════════════════════════════════
-YOUR PLAN FOR TODAY:
+# Dynamic per-signal user message. The methodology lives in the cached system
+# prompt; this carries only TODAY's plan, TODAY's tweets, and the live situation.
+SIGNAL_USER_PROMPT = """══════════════════════════════════════════════════════════
+YOUR PLAN FOR TODAY (from today's newsletter):
 ══════════════════════════════════════════════════════════
 {content_plan}
 
@@ -476,33 +486,39 @@ Current ES price:     {precio_es}
 Level under analysis: {nivel} ({tipo_nivel})
 Bias for the day:     {bias}
 
-TRADING WINDOW AND APPLICABLE CRITERION:
+TRADING WINDOW RIGHT NOW:
 {criterio_ventana}
 
-FAILED BREAKDOWN ANALYSIS:
+FAILED BREAKDOWN ANALYSIS (from the structural detector):
 {fb_descripcion}
 
 15-MINUTE CANDLE: O:{open_15} H:{high_15} L:{low_15} C:{close_15}
 Technical confirmation: {confirmacion}
 
 ══════════════════════════════════════════════════════════
-EVALUATION:
+DECIDE (apply your methodology from the system prompt):
 ══════════════════════════════════════════════════════════
-1. Is this level ({nivel}) actionable according to your plan for today?
-2. Is there a real Failed Breakdown with elevator down + flush + recovery?
-   Is the level a significant major low (daily low, multi-hour, shelf)?
-3. Apply the time-window criterion indicated above.
-4. Do your tweets from today confirm or contraindicate it?
+1. Is this level ({nivel}) one of your pre-planned zones for today?
+2. Is there a real Failed Breakdown (or Level Reclaim / back-test)? Check for a
+   SIGNIFICANT low per your rules — prior-day low, multi-hour low, OR a
+   cluster / multi-day range-low / S-R shelf that produced a strong bounce — a
+   convincing flush (its SIZE only sets how much acceptance is needed), and
+   acceptance on the reclaim.
+3. Apply your time-window rules and the Mode 1 / Mode 2 context.
+4. Do today's plan and tweets confirm or contraindicate it?
+5. If bias is bearish, or this is chop / a "tested-to-death" level, the answer is
+   usually NO trade. You never go short here.
 
-STOP RULE: stop MUST be LOWER than entry for a LONG (max 15 pts of risk).
+STOP RULE: stop MUST be several points below the lowest low of the flush and
+LOWER than entry (max 15 pts of risk).
 
 Respond ONLY with valid JSON:
 {{
   "entrar": true or false,
-  "razon": "explain the window, whether there is a real FB with a clear elevator down, and the level",
+  "razon": "explain the setup: significant low + flush + acceptance, the window, and whether the plan/tweets support it",
   "entrada_es": number,
-  "stop_es": number (LOWER than entrada_es),
-  "target1_es": number (next newsletter level above),
+  "stop_es": number (LOWER than entrada_es, below the lowest low),
+  "target1_es": number (next level above — where you take 75%),
   "target2_es": number or null,
   "confianza": 0.0 to 1.0
 }}"""
@@ -543,14 +559,13 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
         open_15 = high_15 = low_15 = close_15 = f"{precio_es:.1f}"
         confirmacion = "No 15min candle data"
 
-    prompt = SIGNAL_PROMPT.format(
+    user_prompt = SIGNAL_USER_PROMPT.format(
         content_plan     = content_plan,
         tweets_hoy       = formatear_tweets_para_prompt(tweets or []),
         hora_est         = hora_est,
         precio_es        = f"{precio_es:.1f}",
         nivel            = f"{nivel:.1f}",
         tipo_nivel       = tipo_nivel,
-        direccion        = direccion.upper(),
         bias             = today.get('bias', 'unknown'),
         criterio_ventana = criterio_ventana,
         fb_descripcion   = (fb_info or {}).get('descripcion', '⚠️ No analysis'),
@@ -562,14 +577,33 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
     )
 
     try:
-        # C-13: to_thread frees ib_insync's event loop during the 1-3s LLM call.
+        # C-13: to_thread frees ib_insync's event loop during the LLM call.
+        # Phase 2: the DECISION runs on Sonnet 5 (LLM_DECISION_MODEL) with
+        # adaptive thinking for sharper, more Mancini-faithful judgment. The
+        # methodology rubric is a CACHED system block (Phase 1) → ~0.1x on repeat
+        # calls. max_tokens is generous because the total output includes the
+        # thinking tokens plus the reasoning `razon` + the closed JSON.
         response = await asyncio.to_thread(
             client.messages.create,
-            model      = LLM_MODEL,
-            max_tokens = 500,
-            messages   = [{"role": "user", "content": prompt}],
+            model      = LLM_DECISION_MODEL,
+            max_tokens = 2500,
+            thinking   = {"type": "adaptive", "display": "summarized"},
+            output_config = {"effort": "low"},
+            system     = [{"type": "text", "text": MANCINI_SYSTEM,
+                           "cache_control": {"type": "ephemeral"}}],
+            messages   = [{"role": "user", "content": user_prompt}],
         )
-        raw = response.content[0].text.strip()
+        if response.stop_reason == 'max_tokens':
+            print("  ⚠️  LLM hit max_tokens — response may be truncated")
+        # Sonnet 5 returns thinking blocks before the answer — pull the TEXT
+        # block, not content[0] (which may be a thinking block).
+        text_block = next(
+            (b.text for b in response.content if getattr(b, 'type', None) == 'text'),
+            None,
+        )
+        if text_block is None:
+            raise ValueError("No text block in the LLM response")
+        raw = text_block.strip()
         # Fix JSON parsing: the LLM sometimes adds text before/after the JSON
         # causing 'Extra data' in json.loads. Extracting between the first '{'
         # and the last '}' ignores markdown and extra text.
@@ -605,6 +639,14 @@ async def generar_señal_llm(precio_es, nivel, tipo_nivel, direccion,
 # breaks the cooldown. With named constants there is a single source of truth.
 COOLDOWN_SEÑAL_MIN    = 60   # minutes of cooldown after a signal is sent
 COOLDOWN_NO_ENTRY_MIN = 15   # minutes of cooldown after the LLM rejects an entry
+
+# Phase 1.3 — Failed-Breakdown acceptance/entry zone (points ABOVE the low).
+# Adam does not enter while price is still ±3 pts "at" the flushed low; he waits
+# for acceptance and enters when price sits ~5-15 pts above it (max risk 15).
+# We therefore keep a level engageable while price is within this band above it
+# AND a fresh FB has fired — so the bot keeps evaluating through the acceptance
+# window instead of only at the flush.
+FB_ENTRY_ZONE_PTS = 15.0
 
 class SignalEngine:
     """
@@ -787,6 +829,32 @@ class SignalEngine:
         """Puts the level in cooldown for 'minutos' minutes from now (C-10)."""
         self._last_signal[f"{nivel:.0f}"] = datetime.now() + timedelta(minutes=minutos)
 
+    def _log_near_miss(self, nivel, tipo_nivel, precio_es, señal, fb_info, kind):
+        """
+        Phase 2 — record setups we ALMOST took (calibration data).
+
+        'kind' is 'low_confidence' (model said enter but below the confidence
+        threshold) or 'high_conf_reject' (model said no but with ≥0.5 conviction).
+        Appended as JSON lines to data/near_misses.jsonl for later review — this
+        is the raw material for tuning the threshold and the methodology.
+        """
+        try:
+            rec = {
+                'ts':        datetime.now().isoformat(),
+                'kind':      kind,
+                'nivel':     nivel,
+                'tipo':      tipo_nivel,
+                'precio_es': round(float(precio_es), 2),
+                'entrar':    señal.get('entrar'),
+                'confianza': señal.get('confianza'),
+                'razon':     señal.get('razon', ''),
+                'fb':        (fb_info or {}).get('descripcion', ''),
+            }
+            with open(DATA_DIR / 'near_misses.jsonl', 'a', encoding='utf-8') as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+        except Exception:
+            pass
+
     async def check_once(self) -> bool:
         """Full market-check cycle (every 60s)."""
         snapshot = self.feed.get_snapshot()
@@ -842,7 +910,17 @@ class SignalEngine:
             nivel      = nivel_info['nivel']
             tipo_nivel = nivel_info['tipo']
 
-            if not is_price_at_level(precio_es, nivel):
+            fb_info = detect_failed_breakdown(bars_15, nivel)
+
+            # Phase 1.3 — engagement zone. Engage the LLM when price is AT the
+            # level (±tolerance: first touch / back-test / level reclaim) OR when
+            # a fresh Failed Breakdown has fired and price is in the acceptance /
+            # entry zone just ABOVE the low (where Adam actually enters). Without
+            # this the bot only looked at the flush (too early — "no acceptance
+            # yet") and stopped watching before the real entry formed.
+            at_level   = is_price_at_level(precio_es, nivel)
+            en_zona_fb = fb_info['es_fb'] and (0 < precio_es - nivel <= FB_ENTRY_ZONE_PTS)
+            if not (at_level or en_zona_fb):
                 continue
             if self._esta_en_cooldown(nivel):
                 continue
@@ -851,7 +929,6 @@ class SignalEngine:
             if not direccion:
                 continue
 
-            fb_info = detect_failed_breakdown(bars_15, nivel)
             print(f"  {'✅ FB' if fb_info['es_fb'] else '⚠️  No FB'} | "
                   f"Level:{nivel:.0f} ({tipo_nivel}) | "
                   f"{fb_info['descripcion'][:70]}")
@@ -876,8 +953,10 @@ class SignalEngine:
             )
             señal['direccion'] = direccion
 
-            if señal.get('entrar'):
-                confianza = señal.get('confianza', 0)
+            confianza = float(señal.get('confianza', 0) or 0)
+            entrar    = bool(señal.get('entrar'))
+
+            if entrar and confianza >= MIN_SIGNAL_CONFIDENCE:
                 print(f"  ✅ LLM: ENTER ({confianza:.0%} confidence)")
 
                 # C-11: send_signal_alert (escaped HTML, computed R/R)
@@ -901,6 +980,15 @@ class SignalEngine:
                 señal_enviada = True
                 break
 
+            elif entrar:
+                # Phase 2 — the model wants in but conviction is below threshold.
+                # Adam only takes 100%-conviction setups, so we SUPPRESS the alert
+                # and record it as a near-miss for calibration.
+                print(f"  ⚠️  LLM: enter but LOW confidence "
+                      f"({confianza:.0%} < {MIN_SIGNAL_CONFIDENCE:.0%}) — suppressed")
+                self._log_near_miss(nivel, tipo_nivel, precio_es, señal, fb_info, 'low_confidence')
+                self._marcar_cooldown(nivel, minutos=COOLDOWN_NO_ENTRY_MIN)
+
             else:
                 # Print the LLM's FULL reason (it used to be truncated to 100 chars).
                 # It's formatted across multiple lines so it's readable in the console.
@@ -909,6 +997,10 @@ class SignalEngine:
                 print(f"  ❌ LLM: Do not enter — {lineas[0] if lineas else ''}")
                 for linea in lineas[1:]:
                     print(f"                     {linea}")
+                # Phase 2 — log high-confidence rejects too: the model was close,
+                # which is exactly the calibration signal we want to review.
+                if confianza >= 0.5:
+                    self._log_near_miss(nivel, tipo_nivel, precio_es, señal, fb_info, 'high_conf_reject')
                 self._marcar_cooldown(nivel, minutos=COOLDOWN_NO_ENTRY_MIN)
 
         # A-2: persist at the end of the tick

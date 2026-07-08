@@ -17,3 +17,10 @@ data/historical/
 data/backtest/
 data/signal_engine_state.json
 data/tweet_monitor_state.json
+# Phase 0-3: regenerable raw paid-content dumps (refetch via scrapers/)
+knowledge_base/methodology/fundamentals.json
+knowledge_base/methodology/fundamentals.txt
+knowledge_base/methodology/recaps_raw.json
+# Generated calibration/backtest outputs
+data/backtest_june/
+data/near_misses.jsonl

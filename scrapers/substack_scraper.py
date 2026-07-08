@@ -54,6 +54,9 @@ DELAY_BETWEEN_REQUESTS = 1.5  # seconds
 # Articles per page in the Substack API
 BATCH_SIZE = 12
 PREVIEW_MAX_LENGTH = 500  # articles shorter than this are considered previews
+# A full Trade Companion daily runs 20k-40k chars; a paywalled preview is short.
+# Used by needs_download to decide re-fetch by real length, not the stale flag.
+FULL_ARTICLE_MIN_LENGTH = 3000
 
 def get_cookies_dict() -> dict:
     """
@@ -270,12 +273,15 @@ def scrape_newsletter():
             return False            # free articles are already complete
         if not has_paid_access():
             return False            # no cookies → can't improve the preview
-        # Paid article + cookies → re-download if the file is just a preview
+        # Paid article + cookies → re-download only if the stored file is a real
+        # preview. We key off actual content length, NOT the is_complete flag:
+        # the flag was written unreliably by earlier scraper versions (it is
+        # False on ~1,350 already-full articles), so trusting it would trigger a
+        # needless full re-crawl. A genuine paywalled preview is < 3000 chars.
         f = NEWSLETTER_DIR / f"{post['slug']}.json"
         try:
             data = json.load(open(f, encoding='utf-8'))
-            return (not data.get('is_complete', False) or
-                    data.get('content_length', 0) < PREVIEW_MAX_LENGTH)
+            return (data.get('content_length', 0) or 0) < FULL_ARTICLE_MIN_LENGTH
         except Exception:
             return True
 

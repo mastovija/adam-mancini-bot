@@ -1,0 +1,222 @@
+[
+  {
+    "setup": "Failed Breakdown",
+    "level": 7514,
+    "quality": "good",
+    "significant_low": "multi-hour low",
+    "flush_pts": null,
+    "outcome": "Skipped; waited for 7482 setup instead",
+    "lesson": "Multi-hour low (2:05PM flush to 7580s) was valid, but required acceptance protocol before entry to avoid trap.",
+    "date": "2026-06-21"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7482,
+    "quality": "A+",
+    "significant_low": "range low",
+    "flush_pts": 7,
+    "outcome": "Triggered via non-acceptance protocol; ripped to 7550+",
+    "lesson": "Genuine range low from 3:45PM Friday, shallow flush (7pts), fast recovery—non-acceptance protocol cleanly triggered above 7487.",
+    "date": "2026-06-21"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7485,
+    "quality": "A+",
+    "significant_low": "prior-day low",
+    "flush_pts": 120,
+    "outcome": "Worked. Ripped to 7578+. Still holding 10% runner.",
+    "lesson": "Textbook Failed Breakdown: vertical 120pt flush, lost major prior-day low, recovered with acceptance. All components present.",
+    "date": "2026-06-22"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7535,
+    "quality": "good",
+    "significant_low": "cluster/shelf",
+    "flush_pts": 13,
+    "outcome": "Worked. Non-acceptance protocol triggered, rallied to 7558+.",
+    "lesson": "Clear shelf low, shallow flush to 7522, non-acceptance protocol held above 7540 for minutes. Textbook entry.",
+    "date": "2026-06-22"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7521,
+    "quality": null,
+    "significant_low": null,
+    "flush_pts": null,
+    "outcome": "Text cuts off mid-description at Sunday 8:04PM setup.",
+    "lesson": "Incomplete data—cannot evaluate.",
+    "date": "2026-06-22"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7485,
+    "quality": "A+",
+    "significant_low": "prior-day low",
+    "flush_pts": 120,
+    "outcome": "Worked. Ripped to 7578+, held 10% runner.",
+    "lesson": "Elevator flush 120pts, lost major prior-day low, classic recovery. All components present. Study this setup.",
+    "date": "2026-06-23"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7528,
+    "quality": "low-quality",
+    "significant_low": "multi-hour low",
+    "flush_pts": 27,
+    "outcome": "Failed. Paid only to first level 7543, then sold off.",
+    "lesson": "7535 tested-to-death since Thursday with traps. Shallow flush, dangerous zone. Low win rate. Size down.",
+    "date": "2026-06-23"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7427,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": null,
+    "outcome": "Worked; held as runner into Tuesday evening",
+    "lesson": "Double-dip Failed Breakdown of prior-day low. Price defended, recovered cleanly. Hold runners post-elevator down.",
+    "date": "2026-06-24"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7415,
+    "quality": "A+",
+    "significant_low": "prior-day low",
+    "flush_pts": 61,
+    "outcome": "Worked; entered 7422 at 1:42PM after elevator down",
+    "lesson": "Massive prior-day low after 61pt elevator down flush. Non-acceptance protocol triggered. Clean setup, strong follow-through.",
+    "date": "2026-06-24"
+  },
+  {
+    "setup": "No-trade (chop)",
+    "level": 7424,
+    "quality": "low-quality",
+    "significant_low": "range low",
+    "flush_pts": null,
+    "outcome": "Skipped; no elevator down, just chop above 7425 overnight",
+    "lesson": "Mid-range chop between 7424–7492. No structural breakout, no elevator down. Don't trade chop—only trade post-elevator setups.",
+    "date": "2026-06-24"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7408,
+    "quality": "low-quality",
+    "significant_low": "multi-hour low",
+    "flush_pts": 3,
+    "outcome": "Worked. Long 7415, took profits at 7425, 7439.",
+    "lesson": "Well-tested zone, shallow flush. Non-acceptance protocol triggered cleanly above 7413. Solid execution despite low-quality setup.",
+    "date": "2026-06-25"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7405,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": null,
+    "outcome": "Setup identified. Elevator down from 7490 to 7393 at 9:30AM.",
+    "lesson": "Prior-day low after deep elevator down sell. Classic condition. Recap cuts off before outcome, but setup structure sound.",
+    "date": "2026-06-25"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7392,
+    "quality": "low-quality",
+    "significant_low": "prior-day low",
+    "flush_pts": 36,
+    "outcome": "Worked ~20 points; author was asleep, missed it.",
+    "lesson": "Prior-day low with shallow flush in Mode 2 range trap. Already trapped multiple times—lower conviction despite valid setup.",
+    "date": "2026-06-26"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7392,
+    "quality": "low-quality",
+    "significant_low": "prior-day low",
+    "flush_pts": 36,
+    "outcome": "Worked ~20 points; Adam asleep, missed entry",
+    "lesson": "Prior-day low Failed Breakdown, but low-quality due to range already trapped many times—expect shallow follow-through",
+    "date": "2026-06-28"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7421,
+    "quality": "low-quality",
+    "significant_low": "multi-hour low",
+    "flush_pts": null,
+    "outcome": "Skipped Friday due to chop; setup triggered Sunday 6:05pm long at 7432",
+    "lesson": "7421 was deeply trappy, noisy, heavily random. Needed acceptance or non-acceptance protocol. Became tradeable only after 7368 spike lower created rubber-band effect.",
+    "date": "2026-06-29"
+  },
+  {
+    "setup": "Level Reclaim",
+    "level": 7421,
+    "quality": "good",
+    "significant_low": "multi-hour low",
+    "flush_pts": null,
+    "outcome": "Long 7432 Sunday 6:05pm, locked profits at 7437, 7453; runner continued",
+    "lesson": "Failed Breakdown with clear acceptance after volatility spike to 7368. Non-acceptance protocol triggered; clean entry with excellent risk/reward.",
+    "date": "2026-06-29"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7409,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": null,
+    "outcome": "No entry; price too strong, continued rallying instead",
+    "lesson": "Prior-day low 7409 required acceptance or non-acceptance protocol. Market strength prevented setup completion—no trap occurred.",
+    "date": "2026-06-30"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7492,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": null,
+    "outcome": "Identified but not traded (asleep at 3:20 AM entry).",
+    "lesson": "Prior-day low with clear significance. Required acceptance protocol or non-acceptance confirmation before entry.",
+    "date": "2026-07-01"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7511,
+    "quality": "A+",
+    "significant_low": "multi-hour low",
+    "flush_pts": 26,
+    "outcome": "Worked. Long 7516, took 75% at 7521, runner left to work.",
+    "lesson": "Multi-hour low (3:20 AM), 26-point flush from elevator down. Non-acceptance protocol triggered cleanly—textbook setup.",
+    "date": "2026-07-01"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7506,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": 34,
+    "outcome": "Setup identified but no clean trigger; price chopped at 7511.",
+    "lesson": "Prior-day low Failed Breakdown was valid, but acceptance unclear and chop prevented entry. Defer to non-acceptance protocol when noisy.",
+    "date": "2026-07-02"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7506,
+    "quality": "good",
+    "significant_low": "prior-day low",
+    "flush_pts": 34,
+    "outcome": "Setup triggered but no clean entry; price chopped at danger zone 7511.",
+    "lesson": "Prior-day low 7506 was valid, but acceptance unclear in chop. Non-acceptance protocol required holding above 7511—price failed to commit.",
+    "date": "2026-07-05"
+  },
+  {
+    "setup": "Failed Breakdown",
+    "level": 7521,
+    "quality": "A+",
+    "significant_low": "cluster/shelf",
+    "flush_pts": 7,
+    "outcome": "Long at 7526, ripped through Friday. Profitable.",
+    "lesson": "Multi-touch shelf from Wed 8pm to Thu 11am. Non-acceptance protocol triggered at 7526. Clear, actionable setup.",
+    "date": "2026-07-06"
+  }
+]
