@@ -1,8 +1,10 @@
 # Adam Mancini Trading Bot 🤖📈
 
+**Version 0.4 — Phase 4: Calibration & Validation** · updated 2026-07-09
+
 Bot that replicates the trading methodology of [Adam Mancini](https://x.com/AdamMancini4) (@AdamMancini4) on ES Futures (S&P 500).
 
-Reads his daily Substack newsletter and live tweets, monitors ES Futures price via IBKR, and sends Telegram alerts when it detects his characteristic setups: **Failed Breakdown** entries with stop loss and targets, managed level-to-level.
+Reads his daily Substack newsletter and live tweets, monitors ES Futures price via IBKR, and sends Telegram alerts when it detects his characteristic setups: **Failed Breakdown** and **Level Reclaim** entries with stop loss and targets, managed level-to-level. The trade decision is made by **Claude Sonnet 5** reasoning from Adam's own distilled methodology (a cached rubric + few-shot examples), gated by a confidence threshold, a deterministic mid-range-chop veto, and his real trade-discipline rules.
 
 > **Disclaimer:** This bot operates in observation / paper-trading mode only. It does not execute real trades. Always apply your own judgment before trading.
 
@@ -14,14 +16,17 @@ Adam's methodology: each morning he publishes key support and resistance levels 
 
 This bot:
 
-1. Reads Adam's newsletter each morning → extracts: bias, critical level, supports, resistances, full trade plan
+1. Reads Adam's newsletter each morning → extracts (via Claude Haiku): bias, critical level, supports, resistances, full trade plan
 2. Monitors ES Futures price every 60 seconds via IBKR (15-min delayed on paper account)
-3. Detects when price reaches a key level (±3 ES pts tolerance)
-4. Fetches recent 1-min and 15-min candles from IBKR to confirm Failed Breakdown pattern
+3. Detects when price reaches a key level (±3 ES pts tolerance) **or** when a fresh Failed Breakdown has fired and price is in the acceptance zone just above the low
+4. Fetches recent 1-min and 15-min candles from IBKR to confirm the Failed Breakdown pattern (`detect_failed_breakdown`, incl. intra-bar flushes)
 5. Checks Adam's live tweets for real-time context (polled every 3 min via Playwright)
-6. Asks Claude Haiku: *"Would Adam enter here?"* — with the full newsletter plan, today's tweets, candle data, and trading window
-7. If yes: sends a Telegram alert with entry, stop, T1, T2 and R/R ratio
-8. Manages active trade: alerts for T1 hit (→ move stop to breakeven), T2 hit, stop hit
+6. **Deterministic pre-filters (no LLM spend):**
+   - **Mid-range chop veto** — once the day's deep-flush significant low is established, suppresses tested higher levels showing only a shallow flush (the "tested-to-death" chop Adam avoids)
+   - **Day-state gate** — enforces his rules: 1–3 trades/day, first win → stop until the post-2pm session, first non-win → one retry only
+7. Asks **Claude Sonnet 5**: *"Would Adam enter here?"* — reasoning from a **cached methodology rubric + few-shot examples** distilled from his real newsletters, plus the full plan, today's tweets, candle data, and trading window. Returns entry/stop/targets + a confidence score
+8. If the model says enter **and** confidence ≥ `MIN_SIGNAL_CONFIDENCE`: sends a Telegram alert with entry, stop, T1, T2 and R/R ratio (sub-threshold setups are logged to `data/near_misses.jsonl` for calibration)
+9. Manages active trade: alerts for T1 hit (→ move stop to breakeven), T2 hit, stop hit; records the outcome (win/loss/scratch) into the day-state
 
 ---
 
@@ -38,6 +43,44 @@ Running in **paper-trading / observation mode** on a local Mac. Manual restart e
 - [x] **Phase 7** — Bug fixes: 13 bugs resolved (see below)
 - [ ] **Phase 8** — Cloud deployment (Fly.io — Dockerfile pending)
 - [ ] **Phase 9** — Live IBKR account + CME data subscription → real-time data
+
+---
+
+## Changelog — methodology brain & calibration (July 2026)
+
+A second roadmap layered on the build phases above, focused on decision *quality*.
+
+- [x] **Methodology brain** — the LLM now reasons from Adam's **actual published
+  methodology** (`knowledge_base/methodology/rubric.md`, distilled from his
+  fundamentals doc) sent as a **cached system prompt** (~0.1× cost after the first
+  call), instead of a hardcoded paraphrase. Restores his real "significant low"
+  definition, the acceptance protocol, and the Level Reclaim setup.
+- [x] **Sonnet 5 decision model** — the trade decision (`generar_señal_llm`) runs on
+  **Claude Sonnet 5** (`LLM_DECISION_MODEL`) with adaptive thinking; Haiku
+  (`LLM_MODEL`) is kept for cheap, high-volume tasks (newsletter parsing, tweet
+  classification).
+- [x] **Confidence gate + near-miss log** — a signal is sent only if the model says
+  enter **and** `confianza ≥ MIN_SIGNAL_CONFIDENCE` (0.6). Suppressed setups are
+  logged to `data/near_misses.jsonl`.
+- [x] **Reason-by-example** — a few-shot block of real setups
+  (`knowledge_base/methodology/examples.md`) appended to the cached prompt, teaching
+  the take-the-deep-low / skip-the-mid-range-chop discrimination.
+- [x] **Phase 4 deterministic fixes** (from the July 8 paper-trading loss):
+  - **Mid-range chop veto** (`update_significant_low` / `is_midrange_chop_veto`,
+    `DEEP_FLUSH_PTS=20`, `MIDRANGE_BUFFER_PTS=10`) — free 13-day replay: 70 chop
+    vetoes, **0 false vetoes** against Adam's real entries.
+  - **Day-state machine** (`_entrada_permitida_por_estado` /
+    `_registrar_resultado_trade`) — his real trade-discipline rules, enforced in
+    code; covered by `tests/test_phase4_deterministic.py`.
+  - **Error 162 fix** (`ibkr_feed.get_bars`) — the 1-min trade-management fetch
+    asked for a 6-min window inside the 15-min delay blackout; floored to ~23 min.
+    Verified live (0 → 14 bars).
+- [x] **Ground truth + scoring** — hand-reviewed real entries in
+  `backtest/june/ground_truth_entries.csv` (+ `GROUND_TRUTH.md`), scored by
+  `backtest/june/score_vs_ground_truth.py`.
+- [ ] **Confidence-threshold calibration** — needs a paid Sonnet backtest
+  (~$3–19 by scope) to score signals vs. ground truth and finalize
+  `MIN_SIGNAL_CONFIDENCE`. Deferred.
 
 ---
 
@@ -69,7 +112,9 @@ Running in **paper-trading / observation mode** on a local Mac. Manual restart e
 | **15-min IBKR delayed data** (paper account) | Fast setups (<15 min elevator) are missed. Slow setups detected reliably. | Live IBKR account + CME data subscription (~$10–15/mo). Change `reqMarketDataType(3)` → `reqMarketDataType(1)` |
 | **Bot runs on local Mac** | Stops if computer sleeps; manual restart each day | Fly.io deployment (Dockerfile not yet created) |
 | **ChromaDB not wired to signal engine** | 1,403 indexed articles not used in LLM decisions | Decision pending: wire it or remove it |
-| **LLM calibration** | Claude Haiku is conservative — may miss valid setups | Adjust prompt criteria based on observed false negatives |
+| **Confidence threshold not yet calibrated** | `MIN_SIGNAL_CONFIDENCE` (0.6) is a starting guess, not measured | Paid Sonnet backtest scored vs. `ground_truth_entries.csv`, or tune from live paper-trading logs |
+| **Detector-level recall gaps** | 2 of Adam's real June/July entries had no structural trigger (7528, 7540) | Broaden `detect_failed_breakdown` for those cases (Phase-1 work) |
+| **RTH-window blind spot** | Many of Adam's best entries are overnight / Sunday-eve / post-2pm, outside the 07:30–16:00 window | Documented in `backtest/june/GROUND_TRUTH.md`; live overnight monitoring is out of scope for now |
 
 ---
 
@@ -78,7 +123,8 @@ Running in **paper-trading / observation mode** on a local Mac. Manual restart e
 | Component | Tool | Cost/month |
 |---|---|---|
 | Newsletter (paid content) | Substack subscription | $10–15 |
-| LLM (parsing + signal arbitration) | Claude Haiku API | ~$3–5 |
+| LLM — newsletter parsing + tweet classification | Claude Haiku API | ~$2–4 |
+| LLM — trade decision (per-signal) | Claude Sonnet 5 API | ~$0.02–0.03 / decision (a live day ≈ $0.10–0.50) |
 | Market data — paper account | IBKR (delayed, free) | $0 |
 | Market data — live account | IBKR + CME ES data subscription | ~$10–15 |
 | Vector database | ChromaDB local | $0 |
@@ -265,11 +311,15 @@ adam-mancini-bot/
 │   ├── substack_scraper.py        # Downloads newsletter articles
 │   └── twitter_scraper_playwright.py  # Downloads tweet history via Playwright
 │
-├── knowledge_base/            # ChromaDB vector store (indexed, not yet wired to LLM)
+├── knowledge_base/            # Methodology brain + ChromaDB vector store
+│   ├── methodology/
+│   │   ├── rubric.md              # Adam's distilled methodology — cached system prompt
+│   │   ├── examples.md           # Few-shot real setups appended to the cached prompt
+│   │   └── fundamentals.txt      # His raw methodology doc (source for the rubric)
 │   ├── build_kb.py
 │   ├── add_tweets_to_kb.py
 │   ├── processor.py
-│   └── vectordb.py
+│   └── vectordb.py               # ChromaDB (indexed, not yet wired to the LLM)
 │
 ├── parsers/                   # Daily parsing
 │   ├── newsletter_parser.py       # Downloads today's article → today.json
@@ -281,22 +331,34 @@ adam-mancini-bot/
 │   └── alpaca_feed.py             # SPY via Alpaca (fallback)
 │
 ├── signals/                   # Signal engine
-│   └── signal_engine.py           # FB detection + candle confirmation + async LLM
+│   └── signal_engine.py           # FB detection + engagement zone + mid-range veto
+│                                  # + day-state rules + Sonnet 5 decision (async)
 │
 ├── bot/                       # Alerts
 │   └── telegram_alerts.py         # All formatted alerts: briefing, signal, T1/T2/stop, tweet
 │
-├── backtest/                  # Validation
+├── backtest/                  # Validation & calibration
 │   ├── backtester.py
-│   └── download_data.py
+│   ├── download_data.py
+│   └── june/                      # Backtest + ground-truth tooling
+│       ├── backtest_harness.py        # Replays production decision code over stored bars
+│       ├── download_es_bars.py        # 1-min ES bars per day via IBKR
+│       ├── levels_loader.py           # Per-day newsletter levels
+│       ├── ground_truth_entries.csv   # Hand-reviewed real entries (TRACKED)
+│       ├── GROUND_TRUTH.md            # Methodology + findings (TRACKED)
+│       └── score_vs_ground_truth.py   # Structural-recall / veto-safety / precision-recall
 │
-└── data/                      # Local data — not committed to git
+├── tests/
+│   └── test_phase4_deterministic.py   # Veto + day-state regression tests (no pytest dep)
+│
+└── data/                      # Mostly local — generated outputs git-ignored
     ├── raw/
-    │   ├── tweets/                # adam_mancini_tweets.json (~639 tweets)
-    │   └── newsletter/            # one JSON per article (~1403 articles)
+    │   ├── tweets/                # adam_mancini_tweets.json (~694 tweets)
+    │   └── newsletter/            # one JSON per article (~1444 articles)
     ├── daily/
     │   └── today.json             # Today's parsed newsletter
-    ├── signal_engine_state.json   # Active trade + cooldowns (persisted across restarts)
+    ├── near_misses.jsonl          # Sub-threshold + vetoed setups (calibration data)
+    ├── signal_engine_state.json   # Active trade + cooldowns + day-state (persisted)
     └── chromadb/                  # ChromaDB persistent storage
 ```
 
