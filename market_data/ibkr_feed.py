@@ -296,6 +296,18 @@ class ESFeed:
         # (n*2 to leave margin for empty bars from closed-market gaps)
         segundos_necesarios = timeframe_minutes * n * 2 * 60
 
+        # FIX (Phase 4.C) — Error 162 HMDS "query returned no data" on the trade-
+        # management fetch. get_bars(1, 3) asked for only ~6 min ending "now", but
+        # the paper feed is 15-min DELAYED, so that whole window falls inside the
+        # delay blackout → HMDS returns nothing and stop/T1 ran on spot price only.
+        # Floor the window so it always reaches PAST the delay; bars[-n:] below still
+        # trims to exactly n, so wider requests don't change what the caller sees.
+        DELAY_BLACKOUT_SEG = 20 * 60   # 20 min > the ~15-min delayed-feed gap
+        segundos_necesarios = max(
+            segundos_necesarios,
+            timeframe_minutes * n * 60 + DELAY_BLACKOUT_SEG,
+        )
+
         if segundos_necesarios <= 86400:        # up to 1 day → use seconds
             duration = f"{segundos_necesarios} S"
         elif segundos_necesarios <= 86400 * 5:  # up to 5 days → use days

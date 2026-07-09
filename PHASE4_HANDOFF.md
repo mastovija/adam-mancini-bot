@@ -87,24 +87,44 @@ while Adam had a green day. Root causes, in priority order:
 ## Phase 4 — Calibration & Validation (your task)
 
 Goal: make the bot *measurably* match his real trades before it's trusted, and fix
-the failure modes above. Suggested steps (confirm scope/cost with the user):
+the failure modes above.
 
-1. **Confidence-threshold calibration.** Use `data/near_misses.jsonl` + backtest
-   signals vs. hand-reviewed real entries to pick `MIN_SIGNAL_CONFIDENCE`
-   (today's chop entries were 0.62–0.65; A+ deep FB ~0.75 — a ~0.70 threshold
-   likely suppresses the chop). Measure precision/recall, don't guess.
-2. **Deterministic level-ranking (code):** once the day's significant low is
-   established, veto/downgrade long entries on higher mid-range levels in the same
-   range. This is the direct fix for the 7506/7511/7521 mistake.
-3. **Deterministic day-state rules (code):** enforce first-trade-win→stop-until-2pm,
-   max 1–3 trades, 2nd-only-after-loss, never-go-red. Add a day-state machine in
-   `SignalEngine` (it already tracks `_trade_activo`; extend with trades-taken and
-   first-trade-result).
-4. **Fix the Error 162 data issue** in `_gestionar_trade_activo` (fall back to the
-   delayed snapshot high/low, or a working bar source).
-5. **Ground-truth + scoring:** extract his actual entries per day (tweets +
-   newsletter recaps), score the backtest against them across several weeks
-   (active AND chop), report % captured / false-positive rate.
+**STATUS (as of this commit):** the free / no-credit work is DONE and committed;
+only the paid Sonnet backtest + the final threshold pick remain.
+
+1. **Confidence-threshold calibration.** ⏳ **DEFERRED — needs credits.** Must be
+   run on **Sonnet 5** (production's model), NOT Haiku — `confianza` is
+   model-self-reported and doesn't transfer across models. Full 13-day both-view
+   run ≈ 764 Sonnet calls (~$15–19 on the intro pricing); real-time-only ≈ $8–10;
+   a focused ~5-day RT subset ≈ $3–4. The scorer's LLM precision/recall section
+   (`backtest/june/score_vs_ground_truth.py`) lights up once `signals_realtime.csv`
+   has real `entrar` verdicts. Don't guess the threshold — the level veto below is
+   the real chop fix; the threshold is a secondary lever.
+2. **Deterministic level-ranking veto (code):** ✅ **DONE.**
+   `signals.signal_engine.update_significant_low` / `is_midrange_chop_veto`
+   (`DEEP_FLUSH_PTS=20`, `MIDRANGE_BUFFER_PTS=10`), mirrored in the harness.
+   Validated free: 70 chop vetoes over 13 days, **0 false vetoes** on Adam's real
+   entries, Jun-26 7405 winner spared.
+3. **Deterministic day-state rules (code):** ✅ **DONE.** Day-state machine in
+   `SignalEngine` (`_entrada_permitida_por_estado` / `_registrar_resultado_trade`):
+   cap 3/day, first WIN → stop until the post-2pm session, first non-win → one
+   retry only ("never more"). From Adam's own methodology. Covered by
+   `tests/test_phase4_deterministic.py` (incl. the exact July 8 violation).
+4. **Fix the Error 162 data issue:** ✅ **DONE & verified LIVE.**
+   `market_data/ibkr_feed.py` floors the 1-min window past the 15-min delay gap
+   (`get_bars(1,3)`: 6min → 23min). Reproduced the exact error with the old window,
+   confirmed 14 bars with the new one against the live gateway.
+5. **Ground-truth + scoring:** ✅ **DONE (free part).** Hand-reviewed real entries in
+   `backtest/june/ground_truth_entries.csv` + `GROUND_TRUTH.md` (tracked); scorer
+   `backtest/june/score_vs_ground_truth.py`. Key finding: only ~5–7 of his entries
+   are RTH-intraday-evaluable; many are overnight / post-2pm and structurally out
+   of the RTH window's reach. Structural-recall ceiling ≈ 5/7; the 2 misses
+   (6/22 7528, 7/7 7540) are Phase-1 **detector** gaps, not threshold/LLM.
+
+**Remaining free work not yet done:** wiring the day-state rules + a deterministic
+trade-outcome simulator into `backtest_harness.py` so the *paid* backtest reflects
+Adam's trade cap and computes real precision/recall — best built alongside the paid
+run (step 1), its only consumer.
 
 ## Gotchas
 

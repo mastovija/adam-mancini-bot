@@ -66,6 +66,7 @@ from signals.signal_engine import (
     get_all_levels, is_price_at_level, determinar_lado,
     detect_failed_breakdown, generar_señal_llm,
     COOLDOWN_SEÑAL_MIN, COOLDOWN_NO_ENTRY_MIN, FB_ENTRY_ZONE_PTS,
+    update_significant_low, is_midrange_chop_veto,   # Phase 4.A — mid-range veto
 )
 import levels_loader
 
@@ -187,6 +188,7 @@ class ViewState:
     def __init__(self):
         self.cooldown: dict[int, datetime] = {}   # level → expiry (NY)
         self.block_until: datetime | None = None  # global new-entry block (NY)
+        self.significant_low: dict | None = None  # Phase 4.A — day's deepest-FB low
 
     def in_cooldown(self, nivel: float, now_ny: datetime) -> bool:
         exp = self.cooldown.get(round(nivel))
@@ -210,6 +212,13 @@ async def evaluate_view(view_name, price, bars_15, levels, bias, tweets_upto,
         return False
 
     near = [lv for lv in levels if abs(lv['nivel'] - price) <= NEARBY_POINTS]
+
+    # Phase 4.A — pre-pass: anchor the day's significant low from ALL nearby levels
+    # (mirrors production check_once) so the mid-range veto is order-independent.
+    for lv in near:
+        state.significant_low = update_significant_low(
+            state.significant_low, lv['nivel'], detect_failed_breakdown(bars_15, lv['nivel']))
+
     for lv in near:
         nivel, tipo = lv['nivel'], lv['tipo']
         fb = detect_failed_breakdown(bars_15, nivel)
@@ -235,6 +244,17 @@ async def evaluate_view(view_name, price, bars_15, levels, bias, tweets_upto,
             'fb_flush_pts': fb.get('flush_size', 0),
             'fb_desc': fb.get('descripcion', '')[:120],
         }
+
+        # Phase 4.A — deterministic mid-range chop veto: suppress BEFORE the LLM.
+        # Counted as a trigger, never as an llm_call. Recorded so the replay shows
+        # exactly which (level, minute) points were killed.
+        if is_midrange_chop_veto(nivel, fb, state.significant_low):
+            counters['vetoes'] += 1
+            rows.append({**base_row, 'entrar': 'veto', 'confianza': '',
+                         'razon': (f"(midrange-veto: above significant low "
+                                   f"{state.significant_low['price']:.0f})")})
+            state.set_cooldown(nivel, t_ny, COOLDOWN_NO_ENTRY_MIN)
+            continue
 
         if not use_llm:
             # Dry run: count the LLM call that WOULD happen and dedupe with the
@@ -284,8 +304,8 @@ async def run_day(day, today, use_llm, rt_rows, dl_rows, counters):
     session = [b for b in one_min
                if f"{day} {SESSION_START}" <= b['timestamp'] <= f"{day} {SESSION_END}"]
     rt_state, dl_state = ViewState(), ViewState()
-    day_counters = {'rt': {'triggers': 0, 'llm_calls': 0, 'signals': 0},
-                    'dl': {'triggers': 0, 'llm_calls': 0, 'signals': 0}}
+    day_counters = {'rt': {'triggers': 0, 'llm_calls': 0, 'signals': 0, 'vetoes': 0},
+                    'dl': {'triggers': 0, 'llm_calls': 0, 'signals': 0, 'vetoes': 0}}
 
     for bar in session:
         t_ny = NY.localize(datetime.strptime(bar['timestamp'], '%Y-%m-%d %H:%M:%S'))
@@ -309,12 +329,13 @@ async def run_day(day, today, use_llm, rt_rows, dl_rows, counters):
                                 t_ny, dl_state, today, use_llm, dl_rows, day_counters['dl'])
 
     for v in ('rt', 'dl'):
-        for k in ('triggers', 'llm_calls', 'signals'):
+        for k in ('triggers', 'llm_calls', 'signals', 'vetoes'):
             counters[v][k] += day_counters[v][k]
-    print(f"  {day} | RT trig/llm/sig={day_counters['rt']['triggers']}/"
-          f"{day_counters['rt']['llm_calls']}/{day_counters['rt']['signals']}  "
+    print(f"  {day} | RT trig/llm/sig/veto={day_counters['rt']['triggers']}/"
+          f"{day_counters['rt']['llm_calls']}/{day_counters['rt']['signals']}/"
+          f"{day_counters['rt']['vetoes']}  "
           f"DL={day_counters['dl']['triggers']}/{day_counters['dl']['llm_calls']}/"
-          f"{day_counters['dl']['signals']}")
+          f"{day_counters['dl']['signals']}/{day_counters['dl']['vetoes']}")
     return True
 
 
@@ -359,8 +380,8 @@ async def _main():
     print("=" * 68)
 
     rt_rows, dl_rows = [], []
-    counters = {'rt': {'triggers': 0, 'llm_calls': 0, 'signals': 0},
-                'dl': {'triggers': 0, 'llm_calls': 0, 'signals': 0}}
+    counters = {'rt': {'triggers': 0, 'llm_calls': 0, 'signals': 0, 'vetoes': 0},
+                'dl': {'triggers': 0, 'llm_calls': 0, 'signals': 0, 'vetoes': 0}}
 
     evaluated_days = []
     for day in days:
@@ -382,9 +403,11 @@ async def _main():
 
     print("-" * 68)
     print(f"  TOTAL real-time: triggers={counters['rt']['triggers']} "
-          f"llm_calls={counters['rt']['llm_calls']} signals={counters['rt']['signals']}")
+          f"llm_calls={counters['rt']['llm_calls']} signals={counters['rt']['signals']} "
+          f"vetoes={counters['rt']['vetoes']}")
     print(f"  TOTAL delayed:   triggers={counters['dl']['triggers']} "
-          f"llm_calls={counters['dl']['llm_calls']} signals={counters['dl']['signals']}")
+          f"llm_calls={counters['dl']['llm_calls']} signals={counters['dl']['signals']} "
+          f"vetoes={counters['dl']['vetoes']}")
     total_calls = counters['rt']['llm_calls'] + counters['dl']['llm_calls']
     print(f"  → total LLM calls {'made' if use_llm else 'that WOULD be made'}: {total_calls}")
     if use_llm:

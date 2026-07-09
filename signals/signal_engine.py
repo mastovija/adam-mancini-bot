@@ -648,6 +648,53 @@ COOLDOWN_NO_ENTRY_MIN = 15   # minutes of cooldown after the LLM rejects an entr
 # window instead of only at the flush.
 FB_ENTRY_ZONE_PTS = 15.0
 
+# Phase 4.A — deterministic level-ranking veto.
+# The newsletter lists ~40 densely-packed supports, so a Failed Breakdown fires at
+# many mid-range levels. Adam takes the DEEP FB of the day's significant low and
+# skips the tested mid-range levels above it. We enforce that structurally, without
+# spending an LLM call:
+#   - DEEP_FLUSH_PTS: a flush this size marks a genuine significant-low FB
+#     (matches detect_failed_breakdown's 'deep >= 20 = institutional' tier).
+#   - MIDRANGE_BUFFER_PTS: how far ABOVE the established low a level must sit to be
+#     treated as mid-range. Levels at/near/below the low still pass.
+# This is the direct fix for the July 8 loss (7506/7511/7521 chop taken after the
+# 7482 A+ low had already flushed and bounced).
+DEEP_FLUSH_PTS = 20.0
+MIDRANGE_BUFFER_PTS = 10.0
+
+
+def update_significant_low(sig_low: dict | None, nivel: float, fb_info: dict) -> dict | None:
+    """Return the day's significant low = the LOWEST level at which a DEEP Failed
+    Breakdown (flush >= DEEP_FLUSH_PTS) has fired today.
+
+    Set even if the bot did NOT take that trade — the structural detector still saw
+    the A+ low form, which is exactly what was missed live on July 8. Pure function
+    so the live engine and the backtest harness stay in lockstep.
+    """
+    if not fb_info.get('es_fb') or fb_info.get('flush_size', 0) < DEEP_FLUSH_PTS:
+        return sig_low
+    if sig_low is None or nivel < sig_low['price']:
+        return {'price': float(nivel), 'flush': float(fb_info.get('flush_size', 0))}
+    return sig_low
+
+
+def is_midrange_chop_veto(nivel: float, fb_info: dict, sig_low: dict | None) -> bool:
+    """True if this long candidate is tested mid-range chop above the day's
+    established significant low, and should be suppressed WITHOUT an LLM call.
+
+    Allowed (returns False): no significant low yet; the level is at/near/below the
+    low (<= low + MIDRANGE_BUFFER_PTS); or a fresh DEEP flush fired at this level (a
+    real setup, not chop). Applies to supports AND resistances (Level Reclaims).
+    """
+    if sig_low is None:
+        return False
+    if nivel <= sig_low['price'] + MIDRANGE_BUFFER_PTS:
+        return False
+    if fb_info.get('flush_size', 0) >= DEEP_FLUSH_PTS:
+        return False
+    return True
+
+
 class SignalEngine:
     """
     Signal engine with active management of the open trade.
@@ -676,8 +723,61 @@ class SignalEngine:
         self.alerter = TelegramAlerter()
         self._trade_activo: dict | None = None
         self._last_signal: dict = {}
+        # Phase 4.A — per-day state. `_dia` anchors the daily reset; `_significant_low`
+        # is the day's deepest Failed-Breakdown low used by the mid-range veto.
+        self._dia: str | None = None
+        self._significant_low: dict | None = None
+        # Phase 4.B — day-state machine enforcing Adam's trade-discipline rules
+        # (from his methodology): 1–3 trades/day; first WIN → stop until the post-2pm
+        # session; first non-win → exactly one retry ("try a second but never more").
+        self._trades_hoy: int = 0
+        self._resultados_hoy: list[str] = []      # ordered 'win'/'loss'/'scratch'
+        self._primer_resultado: str | None = None  # result of trade #1
         # Restore the trade and cooldowns from a previous session if they exist on disk.
         self._cargar_estado()
+
+    def _reset_day_state_if_new_day(self, hoy: str):
+        """Clear per-day state (significant low + trade discipline) on a new NY day."""
+        if self._dia != hoy:
+            self._dia = hoy
+            self._significant_low = None
+            self._trades_hoy = 0
+            self._resultados_hoy = []
+            self._primer_resultado = None
+
+    def _registrar_resultado_trade(self, result: str):
+        """Record a closed trade's outcome for the day-state rules (Phase 4.B).
+
+        'win' is banked when T1 is reached (stop is at breakeven from then on, so
+        the trade can no longer turn red). 'loss' = stopped before T1. 'scratch' =
+        timed out before T1. Only the first result seeds `_primer_resultado`.
+        """
+        self._resultados_hoy.append(result)
+        if self._primer_resultado is None:
+            self._primer_resultado = result
+        print(f"  📒 Day state: trade result '{result}' recorded — "
+              f"{self._trades_hoy} trade(s) today, first={self._primer_resultado}")
+
+    def _entrada_permitida_por_estado(self, hora_dec: float) -> tuple[bool, str]:
+        """Adam's deterministic trade-count / outcome gate (Phase 4.B).
+
+        Returns (allowed, reason_if_blocked). Applied BEFORE engaging levels, so a
+        day that is 'done' costs no LLM calls.
+        """
+        n = self._trades_hoy
+        if n >= 3:
+            return False, "daily hard cap (3 trades) reached — done for the day"
+        if n == 0:
+            return True, ""
+        if self._primer_resultado == 'win':
+            # "If the first trade is a win, I will wrap it up until the post-2pm session."
+            if hora_dec < 14.0:
+                return False, "first trade WON — wrapping up until the post-2pm session"
+            return True, ""
+        # First trade was a loss/scratch: "try a second but never more."
+        if n >= 2:
+            return False, "already took the second trade after a non-win — 'never more'"
+        return True, ""
 
     # ─────────────────────────────────────────────
     # State persistence on disk (A-2)
@@ -695,6 +795,12 @@ class SignalEngine:
                 'guardado_en':  datetime.now().isoformat(),
                 'trade_activo': trade,
                 'last_signal':  {k: v.isoformat() for k, v in self._last_signal.items()},
+                # Phase 4.A/4.B — per-day state (restored only if same NY day)
+                'dia':               self._dia,
+                'significant_low':   self._significant_low,
+                'trades_hoy':        self._trades_hoy,
+                'resultados_hoy':    self._resultados_hoy,
+                'primer_resultado':  self._primer_resultado,
             }
             STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(STATE_FILE, 'w', encoding='utf-8') as f:
@@ -742,6 +848,25 @@ class SignalEngine:
                     self._last_signal[nivel_str] = expiry
             except Exception:
                 pass
+
+        # ── Phase 4.A/4.B — per-day state, same NY day only ──
+        try:
+            hoy_ny = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+            if data.get('dia') == hoy_ny:
+                self._dia = data['dia']
+                self._significant_low = data.get('significant_low')
+                self._trades_hoy = data.get('trades_hoy', 0)
+                self._resultados_hoy = data.get('resultados_hoy', []) or []
+                self._primer_resultado = data.get('primer_resultado')
+                if self._significant_low:
+                    print(f"  🎯 Significant low restored: "
+                          f"{self._significant_low['price']:.0f} "
+                          f"(flush {self._significant_low['flush']:.0f})")
+                if self._trades_hoy:
+                    print(f"  📒 Day state restored: {self._trades_hoy} trade(s), "
+                          f"first={self._primer_resultado}")
+        except Exception:
+            pass
 
     async def _gestionar_trade_activo(self, precio_es: float) -> str:
         """
@@ -794,17 +919,27 @@ class SignalEngine:
             trade['stop_efectivo'] = entrada
             print(f"  ✅ T1 reached: {t1}")
             await self.alerter.send_t1_alert(trade, alto_reciente)
+            # Phase 4.B — bank the WIN now: stop is at breakeven from here, so the
+            # trade can no longer turn red ("first trade is a win").
+            self._registrar_resultado_trade('win')
 
         # ── Effective stop ───────────────────────────────────────────────────
         if bajo_reciente <= stop_ef:
             print(f"  🛑 Stop hit: {bajo_reciente:.0f}")
             await self.alerter.send_stop_alert(trade, bajo_reciente)
+            # Phase 4.B — a stop BEFORE T1 is a loss; a breakeven stop after T1 was
+            # already banked as a win above.
+            if not trade.get('t1_alcanzado'):
+                self._registrar_resultado_trade('loss')
             self._trade_activo = None
             return 'libre'
 
         # ── 3-hour timeout ────────────────────────────────────────────────────
         if (datetime.now() - trade['hora']).total_seconds() / 3600 >= 3:
             print(f"  ⏰ Trade expired (3h) — releasing")
+            # Phase 4.B — timed out before T1 = scratch (neither win nor loss).
+            if not trade.get('t1_alcanzado'):
+                self._registrar_resultado_trade('scratch')
             self._trade_activo = None
             return 'libre'
 
@@ -864,6 +999,10 @@ class SignalEngine:
         precio_es = snapshot['es_equivalent']
         ahora     = snapshot['timestamp'][:19]
 
+        # Phase 4.A — reset per-day state at the NY day boundary.
+        hoy_ny = datetime.now(pytz.timezone(MARKET_TIMEZONE)).strftime('%Y-%m-%d')
+        self._reset_day_state_if_new_day(hoy_ny)
+
         estado_trade = await self._gestionar_trade_activo(precio_es)
         self._guardar_estado()  # A-2: captures T1→breakeven and closes
 
@@ -896,6 +1035,18 @@ class SignalEngine:
         if estado_trade == 'bloqueado':
             return False
 
+        # Phase 4.B — deterministic day-state gate (Adam's trade-count / outcome
+        # rules). Checked before engaging any level, so a day that is already "done"
+        # (first win, or the retry after a loss used up, or the 3-trade cap) costs
+        # zero LLM calls.
+        ahora_ny = datetime.now(pytz.timezone(MARKET_TIMEZONE))
+        hora_dec = ahora_ny.hour + ahora_ny.minute / 60.0
+        puede_operar, motivo = self._entrada_permitida_por_estado(hora_dec)
+        if not puede_operar:
+            print(f"  🚫 No new entries: {motivo} "
+                  f"[trades={self._trades_hoy}, first={self._primer_resultado}]")
+            return False
+
         señal_enviada = False
 
         # B-6: 15-min candles once before the loop
@@ -906,11 +1057,29 @@ class SignalEngine:
             except Exception as e:
                 print(f"  ⚠️  Error fetching 15min candles: {e}")
 
+        # Phase 4.A — pre-pass: establish the day's significant low from ALL nearby
+        # levels (even ones we won't engage) so the mid-range veto has its anchor
+        # within the same tick, independent of level ordering. FB results are cached
+        # and reused below to avoid recomputing detect_failed_breakdown.
+        prev_low = self._significant_low['price'] if self._significant_low else None
+        fb_by_level: dict[float, dict] = {}
+        for nivel_info in niveles_cercanos:
+            fb = detect_failed_breakdown(bars_15, nivel_info['nivel'])
+            fb_by_level[nivel_info['nivel']] = fb
+            self._significant_low = update_significant_low(
+                self._significant_low, nivel_info['nivel'], fb)
+        if self._significant_low and self._significant_low['price'] != prev_low:
+            veto_above = self._significant_low['price'] + MIDRANGE_BUFFER_PTS
+            print(f"  🎯 Day significant low established: "
+                  f"{self._significant_low['price']:.0f} "
+                  f"(deep flush {self._significant_low['flush']:.0f} pts) — "
+                  f"shallow-flush longs above {veto_above:.0f} now vetoed")
+
         for nivel_info in niveles_cercanos:
             nivel      = nivel_info['nivel']
             tipo_nivel = nivel_info['tipo']
 
-            fb_info = detect_failed_breakdown(bars_15, nivel)
+            fb_info = fb_by_level[nivel]
 
             # Phase 1.3 — engagement zone. Engage the LLM when price is AT the
             # level (±tolerance: first touch / back-test / level reclaim) OR when
@@ -927,6 +1096,23 @@ class SignalEngine:
 
             direccion = determinar_lado(precio_es, nivel_info, bias)
             if not direccion:
+                continue
+
+            # Phase 4.A — deterministic mid-range chop veto (no LLM spend). Once the
+            # day's significant low is in, a tested higher level with only a shallow
+            # flush is the chop Adam avoids — suppress it before querying the model.
+            if is_midrange_chop_veto(nivel, fb_info, self._significant_low):
+                print(f"  ⛔ Mid-range veto: {nivel:.0f} ({tipo_nivel}) sits above "
+                      f"significant low {self._significant_low['price']:.0f} with a "
+                      f"shallow flush ({fb_info.get('flush_size', 0):.0f} pts) — "
+                      f"suppressed, no LLM call")
+                self._log_near_miss(
+                    nivel, tipo_nivel, precio_es,
+                    {'entrar': None, 'confianza': None,
+                     'razon': (f"mid-range chop above significant low "
+                               f"{self._significant_low['price']:.0f}")},
+                    fb_info, 'midrange_veto')
+                self._marcar_cooldown(nivel, minutos=COOLDOWN_NO_ENTRY_MIN)
                 continue
 
             print(f"  {'✅ FB' if fb_info['es_fb'] else '⚠️  No FB'} | "
@@ -974,7 +1160,11 @@ class SignalEngine:
                     't1_alcanzado':  False,
                     't2_alcanzado':  False,
                 }
-                print(f"  🔒 Active trade — new entries blocked")
+                # Phase 4.B — count this trade toward the day's cap. The outcome
+                # (win/loss/scratch) is recorded later when the trade closes.
+                self._trades_hoy += 1
+                print(f"  🔒 Active trade — new entries blocked "
+                      f"(trade #{self._trades_hoy} today)")
 
                 self._marcar_cooldown(nivel, minutos=COOLDOWN_SEÑAL_MIN)
                 señal_enviada = True
